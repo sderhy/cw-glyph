@@ -131,6 +131,8 @@ python scripts/eval_livetest.py \
   --allowed-class-preset copy \
   --threshold 0.18 \
   --char-gap-units 2.3 \
+  --min-segment-units 1.4 \
+  --max-character-units 19 \
   --word-gap-mode unit \
   --word-gap-units 4.5 \
   --window 30 \
@@ -143,6 +145,10 @@ including substitutions, insertions, and deletions. The older best-substring
 mode is available only as a diagnostic for partial windows. JSON output includes
 the command, git commit, checkpoint arguments, per-window predictions, and
 per-file CER breakdown so runs can be reproduced and compared.
+
+For short labelled fragments, prefer a full-file pass (`--duration 0`) over
+fixed windows so artificial window boundaries do not create extra segmentation
+errors.
 
 ## Evaluate Segmentation Alone
 
@@ -183,22 +189,25 @@ synthetic segmentation smoke, fixed threshold with 12 dB SNR + 12 dB QSB:
 synthetic segmentation smoke, adaptive threshold on the same case:
   precision 0.988, recall 0.975
 g3ses/C1.wav with stretch checkpoint: CER 0.000, decoded "R QRL?"
-g3ses/C1.wav with unit32 checkpoint: CER 0.200, decoded "R QRL2"
-g6pz/G1.wav with unit32 checkpoint: CER 0.226
+g3ses/C1.wav with unit32 v2 checkpoint: CER 0.000, decoded "R QRL?"
+g6pz/G1.wav with unit32 v2 checkpoint, full-file pass, short-segment filter,
+  and overlong-segment split: CER 0.089
 ```
 
 These numbers are development measurements from local labelled audio under
 `livetests/`, which is not published in this repository.
 
-The real-audio target is not met yet. The next milestone is to make the full
-WAV -> segments -> glyphs -> characters pipeline reach CER <= 0.05-0.10 on
-labelled recordings, with segmentation quality reported separately.
+The real-audio target is met on one short labelled QSO fragment (`g6pz/G1.wav`)
+but is not proven across the corpus yet. The next milestone is to reproduce
+CER <= 0.05-0.10 on more labelled recordings, with segmentation quality
+reported separately.
 
 ## Roadmap
 
-- Improve real-audio segmentation with local WPM/dot-unit estimation and better
-  word-gap estimation. Adaptive thresholding exists as an explicit experimental
-  mode, but the fixed threshold remains the measured baseline.
+- Improve real-audio segmentation with local WPM/dot-unit estimation, overlong
+  candidate splitting, and better word-gap estimation. Adaptive thresholding
+  exists as an explicit experimental mode, but the fixed threshold remains the
+  measured baseline.
 - Extend segmentation-specific metrics from synthetic references to labelled
   real-audio boundaries.
 - Preserve the glyph-first design while improving continuous-audio front-end
