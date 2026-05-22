@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from morse_char_recognizer.classes import REAL_CLASSES, parse_class_spec
+from morse_char_recognizer.classes import CLASS_PRESETS, REAL_CLASSES, parse_class_spec
 from morse_char_recognizer.dataset import (
     SyntheticDatasetConfig,
     SyntheticMorseCharacterDataset,
@@ -56,6 +56,14 @@ def test_real_class_preset_contains_punctuation_and_prosigns() -> None:
     assert "<UR>" in REAL_CLASSES
     assert "<BT>" not in REAL_CLASSES
     assert "<AR>" not in REAL_CLASSES
+
+
+def test_copy_prosign_preset_excludes_run_ons() -> None:
+    classes = CLASS_PRESETS["copy-prosign"]
+
+    assert "<KN>" in classes
+    assert "<UR>" not in classes
+    assert "<BK>" not in classes
 
 
 def test_parse_class_spec_supports_multi_character_tokens() -> None:

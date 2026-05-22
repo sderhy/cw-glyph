@@ -12,9 +12,9 @@ COPY_CLASSES: tuple[str, ...] = (*BASIC_CLASSES, *PUNCTUATION_CLASSES)
 # distinct sound pattern.
 PROSIGN_CLASSES: tuple[str, ...] = ("<SK>", "<KN>", "<AS>", "<HH>", "<SN>", "<CT>")
 RUN_ON_CLASSES: tuple[str, ...] = ("<UR>", "<BK>")
+COPY_PROSIGN_CLASSES: tuple[str, ...] = (*COPY_CLASSES, *PROSIGN_CLASSES)
 REAL_CLASSES: tuple[str, ...] = (
-    *COPY_CLASSES,
-    *PROSIGN_CLASSES,
+    *COPY_PROSIGN_CLASSES,
     *RUN_ON_CLASSES,
 )
 DEFAULT_CLASSES = BASIC_CLASSES
@@ -22,6 +22,7 @@ DEFAULT_CLASSES = BASIC_CLASSES
 CLASS_PRESETS: dict[str, tuple[str, ...]] = {
     "basic": BASIC_CLASSES,
     "copy": COPY_CLASSES,
+    "copy-prosign": COPY_PROSIGN_CLASSES,
     "real": REAL_CLASSES,
 }
 
