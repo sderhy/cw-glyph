@@ -1,9 +1,30 @@
 # CW Glyph
 
-Experimental character-level CW/Morse recognizer.
+Experimental glyph-level CW/Morse symbol recognizer.
 
-The project treats isolated Morse characters as audio glyphs, by analogy with
-handwritten-character recognition:
+The goal of CW Glyph is to understand and recognize the Morse symbol itself.
+It treats each Morse character, punctuation mark, prosign, or run-on rhythm as
+an audio glyph: a compact temporal shape that can be segmented, normalized, and
+classified.
+
+This is deliberately inspired by handwritten-character recognition:
+
+```text
+handwritten recognition:
+  image of one written symbol
+  -> normalization
+  -> classifier
+  -> symbol
+
+CW Glyph:
+  audio segment of one Morse symbol
+  -> envelope glyph normalization
+  -> classifier
+  -> symbol
+```
+
+The continuous-audio pipeline exists to produce candidate glyphs, but the core
+object of study is still the character-level Morse symbol:
 
 ```text
 continuous CW audio
@@ -16,6 +37,29 @@ continuous CW audio
 The current recognizer includes synthetic data generation, real-WAV preview
 tools, labelled livetest evaluation, and CNN models trained on 52 Morse glyph
 classes.
+
+## Project Scope
+
+CW Glyph is:
+
+- a glyph engine for Morse audio;
+- a Morse symbol classifier;
+- a research tool for comparing Morse glyph representations;
+- a way to evaluate character-by-character recognition before attempting a
+  complete conversational decoder.
+
+CW Glyph is not currently:
+
+- a full HF receiver;
+- a production-grade live CW decoder;
+- a language model for reconstructing operator intent;
+- a complete QSO parser;
+- a replacement for end-to-end decoders trained on full audio transcripts.
+
+This character-first scope is intentional. Segmenting and recognizing symbols
+one at a time makes the errors inspectable: `E/T`, `Q/Y`, `? / 2`, timing
+mistakes, prosign collisions, and operator-specific rhythm all remain visible
+instead of being hidden inside an end-to-end text decoder.
 
 ## Highlights
 
@@ -115,6 +159,8 @@ These numbers are development measurements from local labelled audio under
 
 - Improve real-audio segmentation with local WPM/dot-unit estimation, adaptive
   thresholding, and better word-gap estimation.
+- Preserve the glyph-first design while improving continuous-audio front-end
+  quality.
 - Calibrate or replace naive multi-checkpoint ensembling. Raw CNN confidence
   scores are not comparable across differently normalized models.
 - Expand and document labelled livetest evaluation, including alignment reports
