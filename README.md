@@ -88,6 +88,8 @@ python scripts/eval_livetest.py \
   --allowed-class-preset copy \
   --threshold 0.18 \
   --char-gap-units 2.3 \
+  --word-gap-mode unit \
+  --word-gap-units 4.5 \
   --window 30 \
   --hop 30
 ```

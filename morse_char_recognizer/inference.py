@@ -116,13 +116,18 @@ def join_segment_predictions(
     *,
     sample_rate: int,
     word_gap_ms: float = 250.0,
+    unit_samples: int | None = None,
+    word_gap_units: float = 4.5,
 ) -> str:
     """Join segment predictions, inserting spaces for long inter-character gaps."""
     if not predictions:
         return ""
 
     out = [predictions[0][0]]
-    threshold = word_gap_ms / 1000.0 * sample_rate
+    if unit_samples is not None and unit_samples > 0:
+        threshold = unit_samples * word_gap_units
+    else:
+        threshold = word_gap_ms / 1000.0 * sample_rate
     previous = predictions[0][2]
     for char, _score, segment in predictions[1:]:
         if segment.start - previous.end >= threshold:

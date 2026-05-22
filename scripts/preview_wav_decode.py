@@ -28,7 +28,11 @@ from morse_char_recognizer.live import (
     read_label,
     slice_audio,
 )
-from morse_char_recognizer.segment import SegmentConfig, detect_active_regions
+from morse_char_recognizer.segment import (
+    SegmentConfig,
+    detect_active_regions,
+    estimate_unit_samples,
+)
 
 
 def main() -> None:
@@ -74,6 +78,7 @@ def main() -> None:
         device=args.device,
     )
     active_regions = detect_active_regions(audio, sample_rate, segment_config)
+    unit_samples = estimate_unit_samples(active_regions)
     env = amplitude_envelope(
         audio,
         sample_rate,
@@ -88,6 +93,8 @@ def main() -> None:
         predictions,
         sample_rate=sample_rate,
         word_gap_ms=args.word_gap_ms,
+        unit_samples=unit_samples if args.word_gap_mode == "unit" else None,
+        word_gap_units=args.word_gap_units,
     )
     label = read_label(Path(args.label) if args.label else default_label_path(Path(args.wav)))
 
@@ -110,6 +117,8 @@ def main() -> None:
     print(f"segments={len(predictions)} keydowns={len(active_regions)}")
     if center_hz is not None:
         print(f"center_hz={center_hz:.1f}")
+    if unit_samples:
+        print(f"unit_ms={unit_samples / sample_rate * 1000.0:.1f}")
     print(f"wrote {out}")
 
 
@@ -127,6 +136,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--char-gap-units", type=float, default=2.0)
     parser.add_argument("--pad-ms", type=float, default=20.0)
     parser.add_argument("--word-gap-ms", type=float, default=250.0)
+    parser.add_argument("--word-gap-mode", choices=("fixed", "unit"), default="fixed")
+    parser.add_argument("--word-gap-units", type=float, default=4.5)
     parser.add_argument(
         "--scale-mode",
         choices=("checkpoint", "stretch", "unit"),

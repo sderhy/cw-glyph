@@ -17,6 +17,11 @@ from morse_char_recognizer.inference import (
     load_checkpoint_model,
     predict_audio_segments,
 )
+from morse_char_recognizer.segment import (
+    SegmentConfig,
+    detect_active_regions,
+    estimate_unit_samples,
+)
 
 
 def main() -> None:
@@ -45,10 +50,14 @@ def main() -> None:
         allowed_classes=allowed_classes,
         device=args.device,
     )
+    segment_config = SegmentConfig()
+    unit_samples = estimate_unit_samples(detect_active_regions(audio, sample_rate, segment_config))
     decoded = join_segment_predictions(
         predictions,
         sample_rate=sample_rate,
         word_gap_ms=args.word_gap_ms,
+        unit_samples=unit_samples if args.word_gap_mode == "unit" else None,
+        word_gap_units=args.word_gap_units,
     )
 
     print(decoded)
@@ -64,6 +73,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("checkpoint")
     parser.add_argument("wav")
     parser.add_argument("--word-gap-ms", type=float, default=250.0)
+    parser.add_argument("--word-gap-mode", choices=("fixed", "unit"), default="fixed")
+    parser.add_argument("--word-gap-units", type=float, default=4.5)
     parser.add_argument(
         "--scale-mode",
         choices=("checkpoint", "stretch", "unit"),

@@ -37,3 +37,18 @@ def test_join_segment_predictions_inserts_word_gap() -> None:
     )
 
     assert text == "CQ T"
+
+
+def test_join_segment_predictions_can_use_unit_gap() -> None:
+    text = join_segment_predictions(
+        [
+            ("C", 0.9, Region(0, 100)),
+            ("Q", 0.9, Region(140, 240)),
+            ("T", 0.9, Region(600, 700)),
+        ],
+        sample_rate=1000,
+        unit_samples=80,
+        word_gap_units=4.0,
+    )
+
+    assert text == "CQ T"

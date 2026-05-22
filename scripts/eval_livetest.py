@@ -30,6 +30,8 @@ from morse_char_recognizer.live import (
 )
 from morse_char_recognizer.segment import (
     SegmentConfig,
+    detect_active_regions,
+    estimate_unit_samples,
     extract_segment_envelopes,
     segment_characters,
 )
@@ -122,6 +124,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--char-gap-units", type=float, default=2.0)
     parser.add_argument("--pad-ms", type=float, default=20.0)
     parser.add_argument("--word-gap-ms", type=float, default=250.0)
+    parser.add_argument("--word-gap-mode", choices=("fixed", "unit"), default="fixed")
+    parser.add_argument("--word-gap-units", type=float, default=4.5)
     parser.add_argument(
         "--scale-mode",
         choices=("checkpoint", "stretch", "unit"),
@@ -202,6 +206,7 @@ def _evaluate_window(
         char_gap_units=args.char_gap_units,
         pad_ms=args.pad_ms,
     )
+    unit_samples = estimate_unit_samples(detect_active_regions(audio, sample_rate, segment_config))
     if aux is None:
         predictions = predict_audio_segments(
             model,
@@ -233,6 +238,8 @@ def _evaluate_window(
         predictions,
         sample_rate=sample_rate,
         word_gap_ms=args.word_gap_ms,
+        unit_samples=unit_samples if args.word_gap_mode == "unit" else None,
+        word_gap_units=args.word_gap_units,
     )
     comparison = (
         compare_text(reference, decoded)
@@ -254,6 +261,7 @@ def _evaluate_window(
         "start_s": offset_s,
         "duration_s": audio.size / sample_rate,
         "center_hz": center_hz,
+        "unit_ms": unit_samples / sample_rate * 1000.0 if unit_samples else None,
         "decoded": decoded,
         "reference": reference,
         "matched_reference": comparison.reference,
