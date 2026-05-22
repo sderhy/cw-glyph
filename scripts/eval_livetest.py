@@ -1,0 +1,339 @@
+"""Evaluate trained CNN decoding on labelled real WAV files."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from dataclasses import replace
+from pathlib import Path
+
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from morse_char_recognizer.audio_io import read_wav_mono
+from morse_char_recognizer.classes import CLASS_PRESETS, parse_class_spec
+from morse_char_recognizer.inference import (
+    join_segment_predictions,
+    load_checkpoint_model,
+    predict_audio_segments,
+    predict_envelopes,
+)
+from morse_char_recognizer.live import (
+    compare_best_substring,
+    compare_text,
+    default_label_path,
+    estimate_carrier_hz,
+    read_label,
+    slice_audio,
+    window_starts,
+)
+from morse_char_recognizer.segment import (
+    SegmentConfig,
+    extract_segment_envelopes,
+    segment_characters,
+)
+
+
+def main() -> None:
+    args = _parse_args()
+    model, classes, envelope, _checkpoint_args = load_checkpoint_model(
+        args.checkpoint,
+        device=args.device,
+    )
+    aux = None
+    if args.aux_checkpoint:
+        aux_model, aux_classes, aux_envelope, _aux_args = load_checkpoint_model(
+            args.aux_checkpoint,
+            device=args.device,
+        )
+        if aux_classes != classes:
+            raise SystemExit("aux checkpoint classes do not match primary checkpoint")
+        aux = (aux_model, aux_envelope)
+    if args.scale_mode != "checkpoint":
+        envelope = replace(
+            envelope,
+            scale_mode=args.scale_mode,
+            canonical_units=args.canonical_units,
+        )
+    allowed_classes = parse_class_spec(
+        args.allowed_classes,
+        preset=args.allowed_class_preset,
+    )
+    files = _collect_wavs(args.inputs)
+    if not files:
+        raise SystemExit("no WAV files found")
+
+    all_results = []
+    for wav_path in files:
+        label_path = _label_for(wav_path, args.label)
+        reference = read_label(label_path)
+        sample_rate, audio = read_wav_mono(wav_path)
+        starts = _starts(args, audio.size / sample_rate)
+        for start in starts:
+            result = _evaluate_window(
+                args,
+                wav_path,
+                reference,
+                sample_rate,
+                audio,
+                start,
+                model,
+                classes,
+                envelope,
+                allowed_classes,
+                aux,
+            )
+            all_results.append(result)
+            _print_result(result)
+
+    summary = _summarize(all_results)
+    print(
+        "summary: "
+        f"windows={summary['windows']} avg_accuracy={summary['avg_accuracy']:.3f} "
+        f"weighted_accuracy={summary['weighted_accuracy']:.3f}"
+    )
+    if args.json_out:
+        out = Path(args.json_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"summary": summary, "results": all_results}, indent=2))
+        print(f"wrote {out}")
+    if args.jsonl_out:
+        out = Path(args.jsonl_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("\n".join(json.dumps(item) for item in all_results) + "\n")
+        print(f"wrote {out}")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("checkpoint")
+    parser.add_argument("inputs", nargs="+")
+    parser.add_argument("--aux-checkpoint", default=None)
+    parser.add_argument("--label", default=None)
+    parser.add_argument("--start", type=float, default=0.0)
+    parser.add_argument("--duration", type=float, default=30.0)
+    parser.add_argument("--window", type=float, default=None)
+    parser.add_argument("--hop", type=float, default=None)
+    parser.add_argument("--max-windows", type=int, default=None)
+    parser.add_argument("--threshold", type=float, default=0.18)
+    parser.add_argument("--min-keydown-ms", type=float, default=10.0)
+    parser.add_argument("--merge-gap-ms", type=float, default=8.0)
+    parser.add_argument("--char-gap-units", type=float, default=2.0)
+    parser.add_argument("--pad-ms", type=float, default=20.0)
+    parser.add_argument("--word-gap-ms", type=float, default=250.0)
+    parser.add_argument(
+        "--scale-mode",
+        choices=("checkpoint", "stretch", "unit"),
+        default="checkpoint",
+    )
+    parser.add_argument("--canonical-units", type=float, default=24.0)
+    parser.add_argument("--center-hz", type=float, default=None)
+    parser.add_argument("--auto-center", action="store_true")
+    parser.add_argument("--freq-min", type=float, default=250.0)
+    parser.add_argument("--freq-max", type=float, default=1200.0)
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--allowed-class-preset", choices=tuple(CLASS_PRESETS), default="real")
+    parser.add_argument("--allowed-classes", default=None)
+    parser.add_argument("--json-out", default=None)
+    parser.add_argument("--jsonl-out", default=None)
+    parser.add_argument(
+        "--match-mode",
+        choices=("full", "best-substring"),
+        default="best-substring",
+    )
+    return parser.parse_args()
+
+
+def _collect_wavs(inputs: list[str]) -> list[Path]:
+    wavs: list[Path] = []
+    for item in inputs:
+        path = Path(item)
+        if path.is_dir():
+            wavs.extend(sorted(path.rglob("*.wav")))
+        elif path.suffix.lower() == ".wav":
+            wavs.append(path)
+    return wavs
+
+
+def _label_for(wav_path: Path, explicit_label: str | None) -> Path | None:
+    if explicit_label is not None:
+        return Path(explicit_label)
+    return default_label_path(wav_path)
+
+
+def _starts(args: argparse.Namespace, audio_duration_s: float) -> list[float]:
+    if args.window is None:
+        return [args.start]
+    starts = window_starts(audio_duration_s, args.window, args.hop or args.window)
+    starts = [start for start in starts if start >= args.start]
+    if args.max_windows is not None:
+        starts = starts[: args.max_windows]
+    return starts
+
+
+def _evaluate_window(
+    args: argparse.Namespace,
+    wav_path: Path,
+    reference: str,
+    sample_rate: int,
+    full_audio,
+    start: float,
+    model,
+    classes: tuple[str, ...],
+    envelope,
+    allowed_classes: tuple[str, ...],
+    aux,
+) -> dict:
+    duration = args.window if args.window is not None else args.duration
+    audio, offset_s = slice_audio(full_audio, sample_rate, start, duration)
+
+    center_hz = args.center_hz
+    if args.auto_center:
+        center_hz = estimate_carrier_hz(audio, sample_rate, args.freq_min, args.freq_max)
+    local_envelope = envelope
+    if center_hz is not None:
+        local_envelope = replace(envelope, bandpass_center_hz=center_hz)
+
+    segment_config = SegmentConfig(
+        threshold=args.threshold,
+        min_keydown_ms=args.min_keydown_ms,
+        merge_gap_ms=args.merge_gap_ms,
+        char_gap_units=args.char_gap_units,
+        pad_ms=args.pad_ms,
+    )
+    if aux is None:
+        predictions = predict_audio_segments(
+            model,
+            audio,
+            sample_rate,
+            classes=classes,
+            envelope=local_envelope,
+            segment_config=segment_config,
+            allowed_classes=allowed_classes,
+            device=args.device,
+        )
+    else:
+        aux_model, aux_envelope = aux
+        if center_hz is not None:
+            aux_envelope = replace(aux_envelope, bandpass_center_hz=center_hz)
+        predictions = _predict_ensemble(
+            model,
+            local_envelope,
+            aux_model,
+            aux_envelope,
+            audio,
+            sample_rate,
+            classes,
+            segment_config,
+            allowed_classes,
+            args.device,
+        )
+    decoded = join_segment_predictions(
+        predictions,
+        sample_rate=sample_rate,
+        word_gap_ms=args.word_gap_ms,
+    )
+    comparison = (
+        compare_text(reference, decoded)
+        if args.match_mode == "full"
+        else compare_best_substring(reference, decoded)
+    )
+    scores = [score for _char, score, _segment in predictions]
+    detailed_predictions = [
+        {
+            "char": char,
+            "score": score,
+            "start_s": offset_s + segment.start / sample_rate,
+            "end_s": offset_s + segment.end / sample_rate,
+        }
+        for char, score, segment in predictions
+    ]
+    return {
+        "wav": str(wav_path),
+        "start_s": offset_s,
+        "duration_s": audio.size / sample_rate,
+        "center_hz": center_hz,
+        "decoded": decoded,
+        "reference": reference,
+        "matched_reference": comparison.reference,
+        "edit_distance": comparison.distance,
+        "reference_length": comparison.reference_length,
+        "hypothesis_length": comparison.hypothesis_length,
+        "accuracy": comparison.accuracy,
+        "segments": len(predictions),
+        "mean_score": sum(scores) / len(scores) if scores else 0.0,
+        "predictions": detailed_predictions,
+    }
+
+
+def _print_result(result: dict) -> None:
+    print(
+        f"{Path(result['wav']).name} start={result['start_s']:.1f}s "
+        f"acc={result['accuracy']:.3f} edit={result['edit_distance']} "
+        f"segments={result['segments']} decoded={result['decoded'][:80]}"
+    )
+
+
+def _predict_ensemble(
+    model,
+    envelope,
+    aux_model,
+    aux_envelope,
+    audio,
+    sample_rate: int,
+    classes: tuple[str, ...],
+    segment_config: SegmentConfig,
+    allowed_classes: tuple[str, ...],
+    device: str,
+):
+    segments = segment_characters(audio, sample_rate, segment_config)
+    primary_envs = extract_segment_envelopes(audio, sample_rate, segments, envelope)
+    aux_envs = extract_segment_envelopes(audio, sample_rate, segments, aux_envelope)
+    p_labels, p_scores = predict_envelopes(
+        model,
+        primary_envs,
+        classes=classes,
+        allowed_classes=allowed_classes,
+        device=device,
+    )
+    a_labels, a_scores = predict_envelopes(
+        aux_model,
+        aux_envs,
+        classes=classes,
+        allowed_classes=allowed_classes,
+        device=device,
+    )
+    predictions = []
+    for segment, p_label, p_score, a_label, a_score in zip(
+        segments,
+        p_labels,
+        p_scores,
+        a_labels,
+        a_scores,
+    ):
+        if float(a_score) > float(p_score):
+            predictions.append((classes[int(a_label)], float(a_score), segment))
+        else:
+            predictions.append((classes[int(p_label)], float(p_score), segment))
+    return predictions
+
+
+def _summarize(results: list[dict]) -> dict:
+    if not results:
+        return {"windows": 0, "avg_accuracy": 0.0, "weighted_accuracy": 0.0}
+    total_ref = sum(item["reference_length"] for item in results)
+    total_dist = sum(item["edit_distance"] for item in results)
+    avg_accuracy = sum(item["accuracy"] for item in results) / len(results)
+    weighted = 0.0 if total_ref == 0 else max(0.0, 1.0 - total_dist / total_ref)
+    return {
+        "windows": len(results),
+        "avg_accuracy": avg_accuracy,
+        "weighted_accuracy": weighted,
+        "total_reference_length": total_ref,
+        "total_edit_distance": total_dist,
+    }
+
+
+if __name__ == "__main__":
+    main()
