@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 if __package__ is None or __package__ == "":
@@ -22,13 +25,17 @@ def main() -> None:
     )
 
     if args.sweep_snr:
+        reports = []
         for snr_db in args.sweep_snr:
             report = _evaluate(args, model, classes, envelope, (snr_db, snr_db))
             _print_report(report, title=f"SNR {snr_db:g} dB")
+            reports.append((f"SNR {snr_db:g} dB", report))
+        _write_json(args, reports, checkpoint_args=_checkpoint_args)
         return
 
     report = _evaluate(args, model, classes, envelope, _snr_range(args))
     _print_report(report, title="cnn")
+    _write_json(args, [("cnn", report)], checkpoint_args=_checkpoint_args)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -45,6 +52,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--sweep-snr", type=float, nargs="*", default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--show-confusions", type=int, default=12)
+    parser.add_argument("--json-out", default=None)
     return parser.parse_args()
 
 
@@ -87,6 +95,53 @@ def _print_report(report, *, title: str) -> None:
         print("top confusions:")
         for true_char, pred_char, count in confusions:
             print(f"  {true_char} -> {pred_char}: {count}")
+
+
+def _write_json(args: argparse.Namespace, reports, *, checkpoint_args) -> None:
+    if not args.json_out:
+        return
+    out = Path(args.json_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "metadata": {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "git_commit": _git_commit(),
+            "command": sys.argv,
+            "checkpoint_args": checkpoint_args,
+        },
+        "args": vars(args),
+        "reports": [_report_json(title, report) for title, report in reports],
+    }
+    out.write_text(json.dumps(payload, indent=2))
+    print(f"wrote {out}")
+
+
+def _report_json(title: str, report) -> dict:
+    return {
+        "title": title,
+        "classes": list(report.classes),
+        "accuracy": report.accuracy,
+        "correct": report.correct,
+        "total": report.total,
+        "per_class_accuracy": report.per_class_accuracy,
+        "top_confusions": [
+            {"true": true, "predicted": predicted, "count": count}
+            for true, predicted, count in report.top_confusions(limit=50)
+        ],
+        "confusion": report.confusion.tolist(),
+    }
+
+
+def _git_commit() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 if __name__ == "__main__":

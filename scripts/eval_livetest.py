@@ -22,6 +22,7 @@ from morse_char_recognizer.inference import (
     predict_envelopes,
 )
 from morse_char_recognizer.live import (
+    alignment_summary,
     compare_best_substring,
     compare_text,
     default_label_path,
@@ -91,7 +92,7 @@ def main() -> None:
             all_results.append(result)
             _print_result(result)
 
-    summary = _summarize(all_results)
+    summary = _summarize(all_results, alignment_sample_limit=args.alignment_sample_limit)
     cer_text = "n/a" if summary["cer"] is None else f"{summary['cer']:.3f}"
     accuracy_text = "n/a" if summary["accuracy"] is None else f"{summary['accuracy']:.3f}"
     print(
@@ -161,6 +162,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--allowed-classes", default=None)
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--jsonl-out", default=None)
+    parser.add_argument("--alignment-sample-limit", type=int, default=80)
     parser.add_argument(
         "--match-mode",
         choices=("full", "best-substring"),
@@ -361,7 +363,7 @@ def _predict_ensemble(
     return predictions
 
 
-def _summarize(results: list[dict]) -> dict:
+def _summarize(results: list[dict], *, alignment_sample_limit: int = 80) -> dict:
     if not results:
         return {
             "windows": 0,
@@ -414,6 +416,11 @@ def _summarize(results: list[dict]) -> dict:
             continue
 
         comparison = compare_text(reference, decoded)
+        alignment = alignment_summary(
+            reference,
+            decoded,
+            sample_limit=alignment_sample_limit,
+        )
         file_reports.append(
             {
                 "wav": wav,
@@ -430,6 +437,7 @@ def _summarize(results: list[dict]) -> dict:
                 "coverage_start_s": coverage_start,
                 "coverage_end_s": coverage_end,
                 "audio_duration_s": audio_duration,
+                "alignment": alignment,
             }
         )
         total_ref += comparison.reference_length
