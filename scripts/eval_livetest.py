@@ -92,8 +92,10 @@ def main() -> None:
     summary = _summarize(all_results)
     print(
         "summary: "
-        f"windows={summary['windows']} avg_accuracy={summary['avg_accuracy']:.3f} "
-        f"weighted_accuracy={summary['weighted_accuracy']:.3f}"
+        f"windows={summary['windows']} cer={summary['cer']:.3f} "
+        f"accuracy={summary['accuracy']:.3f} "
+        f"subs={summary['substitutions']} ins={summary['insertions']} "
+        f"del={summary['deletions']}"
     )
     if args.json_out:
         out = Path(args.json_out)
@@ -144,7 +146,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--match-mode",
         choices=("full", "best-substring"),
-        default="best-substring",
+        default="full",
     )
     return parser.parse_args()
 
@@ -241,10 +243,10 @@ def _evaluate_window(
         unit_samples=unit_samples if args.word_gap_mode == "unit" else None,
         word_gap_units=args.word_gap_units,
     )
-    comparison = (
-        compare_text(reference, decoded)
-        if args.match_mode == "full"
-        else compare_best_substring(reference, decoded)
+    diagnostic = (
+        compare_best_substring(reference, decoded)
+        if args.match_mode == "best-substring"
+        else None
     )
     scores = [score for _char, score, _segment in predictions]
     detailed_predictions = [
@@ -264,11 +266,15 @@ def _evaluate_window(
         "unit_ms": unit_samples / sample_rate * 1000.0 if unit_samples else None,
         "decoded": decoded,
         "reference": reference,
-        "matched_reference": comparison.reference,
-        "edit_distance": comparison.distance,
-        "reference_length": comparison.reference_length,
-        "hypothesis_length": comparison.hypothesis_length,
-        "accuracy": comparison.accuracy,
+        "matched_reference": None if diagnostic is None else diagnostic.reference,
+        "edit_distance": None if diagnostic is None else diagnostic.distance,
+        "substitutions": None if diagnostic is None else diagnostic.substitutions,
+        "insertions": None if diagnostic is None else diagnostic.insertions,
+        "deletions": None if diagnostic is None else diagnostic.deletions,
+        "reference_length": None if diagnostic is None else diagnostic.reference_length,
+        "hypothesis_length": len(decoded.replace(" ", "")),
+        "cer": None if diagnostic is None else diagnostic.cer,
+        "accuracy": None if diagnostic is None else diagnostic.accuracy,
         "segments": len(predictions),
         "mean_score": sum(scores) / len(scores) if scores else 0.0,
         "predictions": detailed_predictions,
@@ -276,10 +282,14 @@ def _evaluate_window(
 
 
 def _print_result(result: dict) -> None:
+    metric = (
+        f"diag_acc={result['accuracy']:.3f} edit={result['edit_distance']}"
+        if result["accuracy"] is not None
+        else "diag_acc=n/a edit=n/a"
+    )
     print(
         f"{Path(result['wav']).name} start={result['start_s']:.1f}s "
-        f"acc={result['accuracy']:.3f} edit={result['edit_distance']} "
-        f"segments={result['segments']} decoded={result['decoded'][:80]}"
+        f"{metric} segments={result['segments']} decoded={result['decoded'][:80]}"
     )
 
 
@@ -329,17 +339,62 @@ def _predict_ensemble(
 
 def _summarize(results: list[dict]) -> dict:
     if not results:
-        return {"windows": 0, "avg_accuracy": 0.0, "weighted_accuracy": 0.0}
-    total_ref = sum(item["reference_length"] for item in results)
-    total_dist = sum(item["edit_distance"] for item in results)
-    avg_accuracy = sum(item["accuracy"] for item in results) / len(results)
-    weighted = 0.0 if total_ref == 0 else max(0.0, 1.0 - total_dist / total_ref)
+        return {
+            "windows": 0,
+            "files": [],
+            "cer": 0.0,
+            "accuracy": 0.0,
+            "substitutions": 0,
+            "insertions": 0,
+            "deletions": 0,
+        }
+
+    by_file: dict[str, list[dict]] = {}
+    for item in results:
+        by_file.setdefault(item["wav"], []).append(item)
+
+    file_reports = []
+    total_ref = 0
+    total_dist = 0
+    total_subs = 0
+    total_ins = 0
+    total_dels = 0
+    for wav, items in by_file.items():
+        ordered = sorted(items, key=lambda item: item["start_s"])
+        reference = ordered[0]["reference"]
+        decoded = " ".join(item["decoded"] for item in ordered)
+        comparison = compare_text(reference, decoded)
+        file_reports.append(
+            {
+                "wav": wav,
+                "cer": comparison.cer,
+                "accuracy": comparison.accuracy,
+                "edit_distance": comparison.distance,
+                "substitutions": comparison.substitutions,
+                "insertions": comparison.insertions,
+                "deletions": comparison.deletions,
+                "reference_length": comparison.reference_length,
+                "hypothesis_length": comparison.hypothesis_length,
+                "decoded": decoded,
+            }
+        )
+        total_ref += comparison.reference_length
+        total_dist += comparison.distance
+        total_subs += comparison.substitutions
+        total_ins += comparison.insertions
+        total_dels += comparison.deletions
+
+    cer = 0.0 if total_ref == 0 else total_dist / total_ref
     return {
         "windows": len(results),
-        "avg_accuracy": avg_accuracy,
-        "weighted_accuracy": weighted,
+        "files": file_reports,
+        "cer": cer,
+        "accuracy": max(0.0, 1.0 - cer),
         "total_reference_length": total_ref,
         "total_edit_distance": total_dist,
+        "substitutions": total_subs,
+        "insertions": total_ins,
+        "deletions": total_dels,
     }
 
 

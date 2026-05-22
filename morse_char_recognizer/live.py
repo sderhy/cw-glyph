@@ -16,6 +16,9 @@ class TextComparison:
     reference: str
     hypothesis: str
     distance: int
+    substitutions: int = 0
+    insertions: int = 0
+    deletions: int = 0
 
     @property
     def reference_length(self) -> int:
@@ -30,6 +33,12 @@ class TextComparison:
         if not self.reference:
             return 1.0 if not self.hypothesis else 0.0
         return max(0.0, 1.0 - self.distance / len(self.reference))
+
+    @property
+    def cer(self) -> float:
+        if not self.reference:
+            return 0.0 if not self.hypothesis else 1.0
+        return self.distance / len(self.reference)
 
 
 def slice_audio(
@@ -103,7 +112,8 @@ def compare_text(reference: str, hypothesis: str) -> TextComparison:
     """Compare normalized texts with Levenshtein distance."""
     ref = normalize_copy_text(reference)
     hyp = normalize_copy_text(hypothesis)
-    return TextComparison(ref, hyp, _levenshtein(ref, hyp))
+    distance, substitutions, insertions, deletions = _levenshtein_breakdown(ref, hyp)
+    return TextComparison(ref, hyp, distance, substitutions, insertions, deletions)
 
 
 def compare_best_substring(reference: str, hypothesis: str) -> TextComparison:
@@ -111,10 +121,12 @@ def compare_best_substring(reference: str, hypothesis: str) -> TextComparison:
     ref = normalize_copy_text(reference)
     hyp = normalize_copy_text(hypothesis)
     if not ref or not hyp:
-        return TextComparison(ref, hyp, _levenshtein(ref, hyp))
+        distance, substitutions, insertions, deletions = _levenshtein_breakdown(ref, hyp)
+        return TextComparison(ref, hyp, distance, substitutions, insertions, deletions)
 
     best_distance: int | None = None
     best_ref = ref
+    best_breakdown = (0, 0, 0)
     min_len = max(0, min(len(ref), len(hyp) - max(3, len(hyp) // 4)))
     max_len = min(len(ref), len(hyp) + max(3, len(hyp) // 4))
     step = max(1, len(hyp) // 10)
@@ -126,32 +138,58 @@ def compare_best_substring(reference: str, hypothesis: str) -> TextComparison:
             starts.add(len(ref) - length)
         for start in starts:
             candidate = ref[start : start + length]
-            distance = _levenshtein(candidate, hyp)
+            distance, substitutions, insertions, deletions = _levenshtein_breakdown(candidate, hyp)
             if best_distance is None or distance < best_distance:
                 best_distance = distance
                 best_ref = candidate
-    return TextComparison(best_ref, hyp, best_distance or 0)
+                best_breakdown = (substitutions, insertions, deletions)
+    return TextComparison(best_ref, hyp, best_distance or 0, *best_breakdown)
 
 
 def _levenshtein(a: str, b: str) -> int:
-    if a == b:
-        return 0
-    if not a:
-        return len(b)
-    if not b:
-        return len(a)
+    return _levenshtein_breakdown(a, b)[0]
 
-    previous = list(range(len(b) + 1))
+
+def _levenshtein_breakdown(a: str, b: str) -> tuple[int, int, int, int]:
+    if a == b:
+        return 0, 0, 0, 0
+    if not a:
+        return len(b), 0, len(b), 0
+    if not b:
+        return len(a), 0, 0, len(a)
+
+    # Each cell stores (distance, substitutions, insertions, deletions).
+    previous = [(j, 0, j, 0) for j in range(len(b) + 1)]
     for i, ca in enumerate(a, start=1):
-        current = [i]
+        current = [(i, 0, 0, i)]
         for j, cb in enumerate(b, start=1):
-            cost = 0 if ca == cb else 1
-            current.append(
-                min(
-                    previous[j] + 1,
-                    current[j - 1] + 1,
-                    previous[j - 1] + cost,
-                )
-            )
+            delete = _add_op(previous[j], deletions=1)
+            insert = _add_op(current[j - 1], insertions=1)
+            if ca == cb:
+                substitute = previous[j - 1]
+            else:
+                substitute = _add_op(previous[j - 1], substitutions=1)
+            current.append(min(delete, insert, substitute, key=_alignment_sort_key))
         previous = current
     return previous[-1]
+
+
+def _add_op(
+    value: tuple[int, int, int, int],
+    *,
+    substitutions: int = 0,
+    insertions: int = 0,
+    deletions: int = 0,
+) -> tuple[int, int, int, int]:
+    distance, subs, ins, dels = value
+    return (
+        distance + substitutions + insertions + deletions,
+        subs + substitutions,
+        ins + insertions,
+        dels + deletions,
+    )
+
+
+def _alignment_sort_key(value: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    distance, substitutions, insertions, deletions = value
+    return distance, substitutions, insertions, deletions

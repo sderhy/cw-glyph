@@ -138,27 +138,48 @@ python scripts/eval_livetest.py \
   --hop 30
 ```
 
+The headline metric is full character error rate (CER) over the decoded file,
+including substitutions, insertions, and deletions. The older best-substring
+mode is available only as a diagnostic for partial windows.
+
+## Evaluate Segmentation Alone
+
+Synthetic segmentation tests report missed, split, merged, and false-positive
+character regions independently from CNN classification:
+
+```bash
+python scripts/eval_segmentation_synth.py --text "CQ TEST 599"
+```
+
 ## Current Results
 
-The best measured configuration so far is the real-vocabulary CNN with
-unit-scaled glyph extraction:
+CW Glyph reports full character error rate (CER) with substitutions,
+insertions, and deletions. Segmentation can also be evaluated independently on
+synthetic references.
+
+Current local measurements:
 
 ```text
-checkpoint: outputs/glyph52_real_unit32_cnn_snr5_25.pt
-scale mode: unit
-canonical units: 32
-FAV22 first 8 x 30 s windows: ~0.926 weighted character accuracy
-g3ses/C1.wav: decodes "R QRL?"
-g6pz/G1.wav: ~0.787 best-substring character accuracy
+clean synthetic glyph validation: >= 0.99 accuracy
+noisy synthetic glyph validation (5-25 dB SNR): >= 0.99 accuracy
+g3ses/C1.wav with stretch checkpoint: CER 0.000, decoded "R QRL?"
+g3ses/C1.wav with unit32 checkpoint: CER 0.200, decoded "R QRL2"
+g6pz/G1.wav with unit32 checkpoint: CER 0.226
 ```
 
 These numbers are development measurements from local labelled audio under
 `livetests/`, which is not published in this repository.
 
+The real-audio target is not met yet. The next milestone is to make the full
+WAV -> segments -> glyphs -> characters pipeline reach CER <= 0.05-0.10 on
+labelled recordings, with segmentation quality reported separately.
+
 ## Roadmap
 
 - Improve real-audio segmentation with local WPM/dot-unit estimation, adaptive
   thresholding, and better word-gap estimation.
+- Add segmentation-specific metrics: missed characters, split characters,
+  merged characters, and boundary error on labelled or synthetic references.
 - Preserve the glyph-first design while improving continuous-audio front-end
   quality.
 - Calibrate or replace naive multi-checkpoint ensembling. Raw CNN confidence
