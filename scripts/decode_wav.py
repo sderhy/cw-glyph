@@ -41,16 +41,28 @@ def main() -> None:
             scale_mode=args.scale_mode,
             canonical_units=args.canonical_units,
         )
+    segment_config = SegmentConfig(
+        threshold_mode=args.threshold_mode,
+        threshold=args.threshold,
+        adaptive_window_ms=args.adaptive_window_ms,
+        adaptive_floor_percentile=args.adaptive_floor_percentile,
+        adaptive_peak_percentile=args.adaptive_peak_percentile,
+        adaptive_min_threshold=args.adaptive_min_threshold,
+        min_keydown_ms=args.min_keydown_ms,
+        merge_gap_ms=args.merge_gap_ms,
+        char_gap_units=args.char_gap_units,
+        pad_ms=args.pad_ms,
+    )
     predictions = predict_audio_segments(
         model,
         audio,
         sample_rate,
         classes=classes,
         envelope=envelope,
+        segment_config=segment_config,
         allowed_classes=allowed_classes,
         device=args.device,
     )
-    segment_config = SegmentConfig()
     unit_samples = estimate_unit_samples(detect_active_regions(audio, sample_rate, segment_config))
     decoded = join_segment_predictions(
         predictions,
@@ -72,6 +84,16 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint")
     parser.add_argument("wav")
+    parser.add_argument("--threshold-mode", choices=("fixed", "adaptive"), default="fixed")
+    parser.add_argument("--threshold", type=float, default=0.18)
+    parser.add_argument("--adaptive-window-ms", type=float, default=650.0)
+    parser.add_argument("--adaptive-floor-percentile", type=float, default=20.0)
+    parser.add_argument("--adaptive-peak-percentile", type=float, default=90.0)
+    parser.add_argument("--adaptive-min-threshold", type=float, default=0.03)
+    parser.add_argument("--min-keydown-ms", type=float, default=10.0)
+    parser.add_argument("--merge-gap-ms", type=float, default=8.0)
+    parser.add_argument("--char-gap-units", type=float, default=2.0)
+    parser.add_argument("--pad-ms", type=float, default=20.0)
     parser.add_argument("--word-gap-ms", type=float, default=250.0)
     parser.add_argument("--word-gap-mode", choices=("fixed", "unit"), default="fixed")
     parser.add_argument("--word-gap-units", type=float, default=4.5)

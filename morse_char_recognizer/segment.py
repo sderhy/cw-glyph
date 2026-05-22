@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
+from scipy.ndimage import percentile_filter
 
 from morse_char_recognizer.features import (
     EnvelopeConfig,
@@ -33,7 +35,12 @@ class SegmentConfig:
 
     method: EnvelopeMethod = "hilbert"
     smoothing_ms: float = 4.0
+    threshold_mode: Literal["fixed", "adaptive"] = "fixed"
     threshold: float = 0.18
+    adaptive_window_ms: float = 650.0
+    adaptive_floor_percentile: float = 20.0
+    adaptive_peak_percentile: float = 90.0
+    adaptive_min_threshold: float = 0.03
     min_keydown_ms: float = 10.0
     merge_gap_ms: float = 8.0
     char_gap_units: float = 2.0
@@ -54,7 +61,7 @@ def detect_active_regions(
         method=config.method,
         smoothing_ms=config.smoothing_ms,
     )
-    regions = _runs(envelope >= config.threshold)
+    regions = _runs(_active_mask(envelope, sample_rate, config))
     regions = _merge_close_regions(regions, _ms_to_samples(config.merge_gap_ms, sample_rate))
     min_keydown = _ms_to_samples(config.min_keydown_ms, sample_rate)
     return [region for region in regions if region.duration >= min_keydown]
@@ -117,7 +124,66 @@ def estimate_unit_samples(active_regions: list[Region]) -> int:
     if not active_regions:
         return 0
     durations = np.array([region.duration for region in active_regions], dtype=np.float32)
-    return max(1, int(round(float(np.percentile(durations, 20.0)))))
+    short = durations[durations <= np.percentile(durations, 45.0)]
+    if short.size >= 3:
+        estimate = float(np.median(short))
+    else:
+        estimate = float(np.percentile(durations, 20.0))
+    return max(1, int(round(estimate)))
+
+
+def _active_mask(
+    envelope: np.ndarray,
+    sample_rate: int,
+    config: SegmentConfig,
+) -> np.ndarray:
+    if config.threshold_mode == "fixed":
+        return envelope >= config.threshold
+    if config.threshold_mode != "adaptive":
+        raise ValueError(f"unknown threshold mode: {config.threshold_mode!r}")
+    _validate_adaptive_config(config)
+
+    window = max(3, _ms_to_samples(config.adaptive_window_ms, sample_rate))
+    if window % 2 == 0:
+        window += 1
+    floor = percentile_filter(
+        envelope,
+        percentile=config.adaptive_floor_percentile,
+        size=window,
+        mode="nearest",
+    )
+    peak = percentile_filter(
+        envelope,
+        percentile=config.adaptive_peak_percentile,
+        size=window,
+        mode="nearest",
+    )
+    threshold = floor + config.threshold * np.maximum(peak - floor, 0.0)
+    threshold = np.maximum(threshold, config.adaptive_min_threshold)
+    return envelope >= threshold
+
+
+def _validate_adaptive_config(config: SegmentConfig) -> None:
+    if config.adaptive_window_ms <= 0:
+        raise ValueError(
+            f"adaptive_window_ms must be positive, got {config.adaptive_window_ms}"
+        )
+    if not 0 <= config.adaptive_floor_percentile <= 100:
+        raise ValueError(
+            "adaptive_floor_percentile must be in [0, 100], "
+            f"got {config.adaptive_floor_percentile}"
+        )
+    if not 0 <= config.adaptive_peak_percentile <= 100:
+        raise ValueError(
+            "adaptive_peak_percentile must be in [0, 100], "
+            f"got {config.adaptive_peak_percentile}"
+        )
+    if config.adaptive_floor_percentile >= config.adaptive_peak_percentile:
+        raise ValueError("adaptive_floor_percentile must be below adaptive_peak_percentile")
+    if config.adaptive_min_threshold < 0:
+        raise ValueError(
+            f"adaptive_min_threshold must be non-negative, got {config.adaptive_min_threshold}"
+        )
 
 
 def _char_gap_threshold(

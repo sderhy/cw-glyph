@@ -77,9 +77,8 @@ instead of being hidden inside an end-to-end text decoder.
 ## Setup
 
 ```bash
-uv venv
-uv pip install -e ".[dev]"
-pytest
+uv sync --extra dev
+uv run pytest
 ```
 
 ## Train
@@ -135,12 +134,15 @@ python scripts/eval_livetest.py \
   --word-gap-mode unit \
   --word-gap-units 4.5 \
   --window 30 \
-  --hop 30
+  --hop 30 \
+  --json-out outputs/livetest_eval.json
 ```
 
 The headline metric is full character error rate (CER) over the decoded file,
 including substitutions, insertions, and deletions. The older best-substring
-mode is available only as a diagnostic for partial windows.
+mode is available only as a diagnostic for partial windows. JSON output includes
+the command, git commit, checkpoint arguments, per-window predictions, and
+per-file CER breakdown so runs can be reproduced and compared.
 
 ## Evaluate Segmentation Alone
 
@@ -148,8 +150,22 @@ Synthetic segmentation tests report missed, split, merged, and false-positive
 character regions independently from CNN classification:
 
 ```bash
-python scripts/eval_segmentation_synth.py --text "CQ TEST 599"
+python scripts/eval_segmentation_synth.py \
+  --text "CQ TEST 599" \
+  --wpm 15 20 25 \
+  --seeds 0 1 2 \
+  --snr-db 12 \
+  --qsb-rate-hz 0.25 \
+  --qsb-depth-db 12 \
+  --json-out outputs/segmentation_eval.json
 ```
+
+Segmentation supports two threshold modes:
+
+- `fixed`: global envelope threshold, currently still the baseline to beat;
+- `adaptive`: local percentile threshold for recordings with changing level or
+  QSB. It is experimental and must be selected explicitly with
+  `--threshold-mode adaptive`.
 
 ## Current Results
 
@@ -162,6 +178,10 @@ Current local measurements:
 ```text
 clean synthetic glyph validation: >= 0.99 accuracy
 noisy synthetic glyph validation (5-25 dB SNR): >= 0.99 accuracy
+synthetic segmentation smoke, fixed threshold with 12 dB SNR + 12 dB QSB:
+  precision 1.000, recall 1.000
+synthetic segmentation smoke, adaptive threshold on the same case:
+  precision 0.988, recall 0.975
 g3ses/C1.wav with stretch checkpoint: CER 0.000, decoded "R QRL?"
 g3ses/C1.wav with unit32 checkpoint: CER 0.200, decoded "R QRL2"
 g6pz/G1.wav with unit32 checkpoint: CER 0.226
@@ -176,10 +196,11 @@ labelled recordings, with segmentation quality reported separately.
 
 ## Roadmap
 
-- Improve real-audio segmentation with local WPM/dot-unit estimation, adaptive
-  thresholding, and better word-gap estimation.
-- Add segmentation-specific metrics: missed characters, split characters,
-  merged characters, and boundary error on labelled or synthetic references.
+- Improve real-audio segmentation with local WPM/dot-unit estimation and better
+  word-gap estimation. Adaptive thresholding exists as an explicit experimental
+  mode, but the fixed threshold remains the measured baseline.
+- Extend segmentation-specific metrics from synthetic references to labelled
+  real-audio boundaries.
 - Preserve the glyph-first design while improving continuous-audio front-end
   quality.
 - Calibrate or replace naive multi-checkpoint ensembling. Raw CNN confidence

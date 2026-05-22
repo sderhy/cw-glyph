@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 if __package__ is None or __package__ == "":
@@ -39,7 +41,7 @@ from morse_char_recognizer.segment import (
 
 def main() -> None:
     args = _parse_args()
-    model, classes, envelope, _checkpoint_args = load_checkpoint_model(
+    model, classes, envelope, checkpoint_args = load_checkpoint_model(
         args.checkpoint,
         device=args.device,
     )
@@ -100,7 +102,16 @@ def main() -> None:
     if args.json_out:
         out = Path(args.json_out)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps({"summary": summary, "results": all_results}, indent=2))
+        out.write_text(
+            json.dumps(
+                {
+                    "metadata": _metadata(args, checkpoint_args),
+                    "summary": summary,
+                    "results": all_results,
+                },
+                indent=2,
+            )
+        )
         print(f"wrote {out}")
     if args.jsonl_out:
         out = Path(args.jsonl_out)
@@ -120,7 +131,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--window", type=float, default=None)
     parser.add_argument("--hop", type=float, default=None)
     parser.add_argument("--max-windows", type=int, default=None)
+    parser.add_argument("--threshold-mode", choices=("fixed", "adaptive"), default="fixed")
     parser.add_argument("--threshold", type=float, default=0.18)
+    parser.add_argument("--adaptive-window-ms", type=float, default=650.0)
+    parser.add_argument("--adaptive-floor-percentile", type=float, default=20.0)
+    parser.add_argument("--adaptive-peak-percentile", type=float, default=90.0)
+    parser.add_argument("--adaptive-min-threshold", type=float, default=0.03)
     parser.add_argument("--min-keydown-ms", type=float, default=10.0)
     parser.add_argument("--merge-gap-ms", type=float, default=8.0)
     parser.add_argument("--char-gap-units", type=float, default=2.0)
@@ -202,7 +218,12 @@ def _evaluate_window(
         local_envelope = replace(envelope, bandpass_center_hz=center_hz)
 
     segment_config = SegmentConfig(
+        threshold_mode=args.threshold_mode,
         threshold=args.threshold,
+        adaptive_window_ms=args.adaptive_window_ms,
+        adaptive_floor_percentile=args.adaptive_floor_percentile,
+        adaptive_peak_percentile=args.adaptive_peak_percentile,
+        adaptive_min_threshold=args.adaptive_min_threshold,
         min_keydown_ms=args.min_keydown_ms,
         merge_gap_ms=args.merge_gap_ms,
         char_gap_units=args.char_gap_units,
@@ -396,6 +417,28 @@ def _summarize(results: list[dict]) -> dict:
         "insertions": total_ins,
         "deletions": total_dels,
     }
+
+
+def _metadata(args: argparse.Namespace, checkpoint_args) -> dict:
+    return {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "git_commit": _git_commit(),
+        "command": sys.argv,
+        "args": vars(args),
+        "checkpoint_args": checkpoint_args,
+    }
+
+
+def _git_commit() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 if __name__ == "__main__":
