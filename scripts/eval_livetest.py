@@ -92,12 +92,14 @@ def main() -> None:
             _print_result(result)
 
     summary = _summarize(all_results)
+    cer_text = "n/a" if summary["cer"] is None else f"{summary['cer']:.3f}"
+    accuracy_text = "n/a" if summary["accuracy"] is None else f"{summary['accuracy']:.3f}"
     print(
         "summary: "
-        f"windows={summary['windows']} cer={summary['cer']:.3f} "
-        f"accuracy={summary['accuracy']:.3f} "
+        f"windows={summary['windows']} cer={cer_text} "
+        f"accuracy={accuracy_text} "
         f"subs={summary['substitutions']} ins={summary['insertions']} "
-        f"del={summary['deletions']}"
+        f"del={summary['deletions']} complete_files={summary['complete_files']}"
     )
     if args.json_out:
         out = Path(args.json_out)
@@ -283,6 +285,7 @@ def _evaluate_window(
         "wav": str(wav_path),
         "start_s": offset_s,
         "duration_s": audio.size / sample_rate,
+        "audio_total_duration_s": full_audio.size / sample_rate,
         "center_hz": center_hz,
         "unit_ms": unit_samples / sample_rate * 1000.0 if unit_samples else None,
         "decoded": decoded,
@@ -363,8 +366,9 @@ def _summarize(results: list[dict]) -> dict:
         return {
             "windows": 0,
             "files": [],
-            "cer": 0.0,
-            "accuracy": 0.0,
+            "cer": None,
+            "accuracy": None,
+            "complete_files": 0,
             "substitutions": 0,
             "insertions": 0,
             "deletions": 0,
@@ -384,6 +388,31 @@ def _summarize(results: list[dict]) -> dict:
         ordered = sorted(items, key=lambda item: item["start_s"])
         reference = ordered[0]["reference"]
         decoded = " ".join(item["decoded"] for item in ordered)
+        coverage_start = min(item["start_s"] for item in ordered)
+        coverage_end = max(item["start_s"] + item["duration_s"] for item in ordered)
+        audio_duration = max(item["audio_total_duration_s"] for item in ordered)
+        coverage_complete = coverage_start <= 0.1 and coverage_end >= audio_duration - 0.1
+        if not coverage_complete:
+            file_reports.append(
+                {
+                    "wav": wav,
+                    "cer": None,
+                    "accuracy": None,
+                    "edit_distance": None,
+                    "substitutions": None,
+                    "insertions": None,
+                    "deletions": None,
+                    "reference_length": len(reference.replace(" ", "")),
+                    "hypothesis_length": len(decoded.replace(" ", "")),
+                    "decoded": decoded,
+                    "coverage_complete": False,
+                    "coverage_start_s": coverage_start,
+                    "coverage_end_s": coverage_end,
+                    "audio_duration_s": audio_duration,
+                }
+            )
+            continue
+
         comparison = compare_text(reference, decoded)
         file_reports.append(
             {
@@ -397,6 +426,10 @@ def _summarize(results: list[dict]) -> dict:
                 "reference_length": comparison.reference_length,
                 "hypothesis_length": comparison.hypothesis_length,
                 "decoded": decoded,
+                "coverage_complete": True,
+                "coverage_start_s": coverage_start,
+                "coverage_end_s": coverage_end,
+                "audio_duration_s": audio_duration,
             }
         )
         total_ref += comparison.reference_length
@@ -405,12 +438,13 @@ def _summarize(results: list[dict]) -> dict:
         total_ins += comparison.insertions
         total_dels += comparison.deletions
 
-    cer = 0.0 if total_ref == 0 else total_dist / total_ref
+    cer = None if total_ref == 0 else total_dist / total_ref
     return {
         "windows": len(results),
         "files": file_reports,
         "cer": cer,
-        "accuracy": max(0.0, 1.0 - cer),
+        "accuracy": None if cer is None else max(0.0, 1.0 - cer),
+        "complete_files": sum(1 for item in file_reports if item["coverage_complete"]),
         "total_reference_length": total_ref,
         "total_edit_distance": total_dist,
         "substitutions": total_subs,
