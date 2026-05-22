@@ -160,6 +160,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--allowed-class-preset", choices=tuple(CLASS_PRESETS), default="real")
     parser.add_argument("--allowed-classes", default=None)
+    parser.add_argument("--min-score", type=float, default=0.0)
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--jsonl-out", default=None)
     parser.add_argument("--alignment-sample-limit", type=int, default=80)
@@ -261,6 +262,13 @@ def _evaluate_window(
             allowed_classes,
             args.device,
         )
+    raw_prediction_count = len(predictions)
+    if args.min_score > 0:
+        predictions = [
+            (char, score, segment)
+            for char, score, segment in predictions
+            if score >= args.min_score
+        ]
     decoded = join_segment_predictions(
         predictions,
         sample_rate=sample_rate,
@@ -302,6 +310,8 @@ def _evaluate_window(
         "cer": None if diagnostic is None else diagnostic.cer,
         "accuracy": None if diagnostic is None else diagnostic.accuracy,
         "segments": len(predictions),
+        "raw_segments": raw_prediction_count,
+        "rejected_segments": raw_prediction_count - len(predictions),
         "mean_score": sum(scores) / len(scores) if scores else 0.0,
         "predictions": detailed_predictions,
     }

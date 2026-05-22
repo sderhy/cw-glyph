@@ -82,6 +82,12 @@ def main() -> None:
         allowed_classes=allowed_classes,
         device=args.device,
     )
+    if args.min_score > 0:
+        predictions = [
+            (char, score, segment)
+            for char, score, segment in predictions
+            if score >= args.min_score
+        ]
     active_regions = detect_active_regions(audio, sample_rate, segment_config)
     unit_samples = estimate_unit_samples(active_regions)
     env = amplitude_envelope(
@@ -161,6 +167,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--spectrogram-max-hz", type=float, default=1400.0)
     parser.add_argument("--allowed-class-preset", choices=tuple(CLASS_PRESETS), default="real")
     parser.add_argument("--allowed-classes", default=None)
+    parser.add_argument("--min-score", type=float, default=0.0)
     parser.add_argument("--device", default="cpu")
     return parser.parse_args()
 
