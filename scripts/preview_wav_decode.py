@@ -90,6 +90,12 @@ def main() -> None:
         ]
     active_regions = detect_active_regions(audio, sample_rate, segment_config)
     unit_samples = estimate_unit_samples(active_regions)
+    if args.min_segment_units > 0 and unit_samples > 0:
+        predictions = [
+            (char, score, segment)
+            for char, score, segment in predictions
+            if segment.duration >= args.min_segment_units * unit_samples
+        ]
     env = amplitude_envelope(
         audio,
         sample_rate,
@@ -168,6 +174,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--allowed-class-preset", choices=tuple(CLASS_PRESETS), default="real")
     parser.add_argument("--allowed-classes", default=None)
     parser.add_argument("--min-score", type=float, default=0.0)
+    parser.add_argument("--min-segment-units", type=float, default=0.0)
     parser.add_argument("--device", default="cpu")
     return parser.parse_args()
 

@@ -12,42 +12,37 @@ from pathlib import Path
 
 def main() -> None:
     args = _parse_args()
-    best = None
+    best_ref = {"best": None}
     results = []
     for threshold in args.thresholds:
         for char_gap_units in args.char_gap_units:
             for min_score in args.min_scores:
-                result = _run_eval(args, threshold, char_gap_units, min_score)
-                results.append(
-                    {
-                        "threshold": threshold,
-                        "char_gap_units": char_gap_units,
-                        "min_score": min_score,
-                        **result,
-                    }
-                )
-                metric = _metric(result)
-                metric_text = "n/a" if metric is None else f"{metric:.3f}"
-                cer_text = "n/a" if result["cer"] is None else f"{result['cer']:.3f}"
-                print(
-                    f"threshold={threshold:g} char_gap_units={char_gap_units:g} "
-                    f"min_score={min_score:g} cer={cer_text} score={metric_text} "
-                    f"segments={result['segments']} rejected={result['rejected_segments']}"
-                )
-                if metric is not None and (best is None or metric < best["score"]):
-                    best = {
-                        "threshold": threshold,
-                        "char_gap_units": char_gap_units,
-                        "min_score": min_score,
-                        "score": metric,
-                        **result,
-                    }
+                for min_segment_units in args.min_segment_units:
+                    result = _run_eval(
+                        args,
+                        threshold,
+                        char_gap_units,
+                        min_score,
+                        min_segment_units,
+                    )
+                    _handle_result(
+                        args,
+                        best_ref,
+                        results,
+                        threshold,
+                        char_gap_units,
+                        min_score,
+                        min_segment_units,
+                        result,
+                    )
+    best = best_ref["best"]
     if best is not None:
         print(
             "best: "
             f"threshold={best['threshold']:g} "
             f"char_gap_units={best['char_gap_units']:g} "
             f"min_score={best['min_score']:g} "
+            f"min_segment_units={best['min_segment_units']:g} "
             f"cer={best['cer']:.3f} segments={best['segments']}"
         )
     if args.json_out:
@@ -55,6 +50,47 @@ def main() -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps({"best": best, "results": results}, indent=2))
         print(f"wrote {out}")
+
+
+def _handle_result(
+    args: argparse.Namespace,
+    best_ref: dict,
+    results: list[dict],
+    threshold: float,
+    char_gap_units: float,
+    min_score: float,
+    min_segment_units: float,
+    result: dict,
+) -> None:
+    del args
+    results.append(
+        {
+            "threshold": threshold,
+            "char_gap_units": char_gap_units,
+            "min_score": min_score,
+            "min_segment_units": min_segment_units,
+            **result,
+        }
+    )
+    metric = _metric(result)
+    metric_text = "n/a" if metric is None else f"{metric:.3f}"
+    cer_text = "n/a" if result["cer"] is None else f"{result['cer']:.3f}"
+    print(
+        f"threshold={threshold:g} char_gap_units={char_gap_units:g} "
+        f"min_score={min_score:g} min_segment_units={min_segment_units:g} "
+        f"cer={cer_text} score={metric_text} "
+        f"segments={result['segments']} rejected={result['rejected_segments']}"
+    )
+    best = best_ref["best"]
+    if metric is not None and (best is None or metric < best["score"]):
+        best_ref["best"] = {
+            "threshold": threshold,
+            "char_gap_units": char_gap_units,
+            "min_score": min_score,
+            "min_segment_units": min_segment_units,
+            "score": metric,
+            **result,
+        }
 
 
 def _parse_args() -> argparse.Namespace:
@@ -65,6 +101,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--thresholds", type=float, nargs="+", default=[0.12, 0.15, 0.18, 0.22])
     parser.add_argument("--char-gap-units", type=float, nargs="+", default=[1.7, 2.0, 2.3])
     parser.add_argument("--min-scores", type=float, nargs="+", default=[0.0])
+    parser.add_argument("--min-segment-units", type=float, nargs="+", default=[0.0])
     parser.add_argument("--threshold-mode", choices=("fixed", "adaptive"), default="fixed")
     parser.add_argument(
         "--scale-mode",
@@ -89,6 +126,7 @@ def _run_eval(
     threshold: float,
     char_gap_units: float,
     min_score: float,
+    min_segment_units: float,
 ) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
         cmd = [
@@ -120,6 +158,8 @@ def _run_eval(
             args.match_mode,
             "--min-score",
             str(min_score),
+            "--min-segment-units",
+            str(min_segment_units),
             "--json-out",
             tmp.name,
             "--device",

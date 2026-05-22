@@ -161,6 +161,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--allowed-class-preset", choices=tuple(CLASS_PRESETS), default="real")
     parser.add_argument("--allowed-classes", default=None)
     parser.add_argument("--min-score", type=float, default=0.0)
+    parser.add_argument("--min-segment-units", type=float, default=0.0)
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--jsonl-out", default=None)
     parser.add_argument("--alignment-sample-limit", type=int, default=80)
@@ -268,6 +269,12 @@ def _evaluate_window(
             (char, score, segment)
             for char, score, segment in predictions
             if score >= args.min_score
+        ]
+    if args.min_segment_units > 0 and unit_samples > 0:
+        predictions = [
+            (char, score, segment)
+            for char, score, segment in predictions
+            if segment.duration >= args.min_segment_units * unit_samples
         ]
     decoded = join_segment_predictions(
         predictions,
