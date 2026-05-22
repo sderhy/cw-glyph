@@ -47,6 +47,20 @@ def test_adaptive_threshold_recovers_faded_keydowns() -> None:
     assert len(adaptive) == 3
 
 
+def test_segment_characters_can_split_overlong_candidate() -> None:
+    audio = synthesize("OL", wpm=20, sample_rate=8000, rise_ms=1.0)
+
+    merged = segment_characters(audio, 8000, SegmentConfig(char_gap_units=4.0))
+    split = segment_characters(
+        audio,
+        8000,
+        SegmentConfig(char_gap_units=4.0, max_character_units=20.0),
+    )
+
+    assert len(merged) == 1
+    assert len(split) == 2
+
+
 def _tone_pulse_train(sample_rate: int, amplitudes: list[float]) -> np.ndarray:
     chunks = []
     pulse_samples = int(round(0.08 * sample_rate))

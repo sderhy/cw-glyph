@@ -65,6 +65,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--adaptive-peak-percentile", type=float, default=90.0)
     parser.add_argument("--adaptive-min-threshold", type=float, default=0.03)
     parser.add_argument("--char-gap-units", type=float, default=2.3)
+    parser.add_argument("--max-character-units", type=float, default=None)
     parser.add_argument("--pad-ms", type=float, default=20.0)
     parser.add_argument("--snr-db", type=float, default=float("inf"))
     parser.add_argument("--qsb-rate-hz", type=float, default=0.0)
@@ -106,6 +107,7 @@ def _run_case(args: argparse.Namespace, wpm: float, seed: int) -> dict:
         adaptive_peak_percentile=args.adaptive_peak_percentile,
         adaptive_min_threshold=args.adaptive_min_threshold,
         char_gap_units=args.char_gap_units,
+        max_character_units=args.max_character_units,
         pad_ms=args.pad_ms,
     )
     predicted = segment_characters(audio, args.sample_rate, config)

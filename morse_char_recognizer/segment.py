@@ -45,6 +45,7 @@ class SegmentConfig:
     merge_gap_ms: float = 8.0
     char_gap_units: float = 2.0
     fixed_char_gap_ms: float | None = None
+    max_character_units: float | None = None
     pad_ms: float = 20.0
 
 
@@ -81,16 +82,19 @@ def segment_characters(
     gap_threshold = _char_gap_threshold(active, sample_rate, config)
     pad = _ms_to_samples(config.pad_ms, sample_rate)
 
+    unit = estimate_unit_samples(active)
     segments: list[Region] = []
-    start = active[0].start
+    group: list[Region] = [active[0]]
     prev = active[0]
     for region in active[1:]:
         gap = region.start - prev.end
         if gap >= gap_threshold:
-            segments.append(_padded_region(start, prev.end, pad, len(audio)))
-            start = region.start
+            segments.extend(_character_segments(group, unit, pad, len(audio), config))
+            group = [region]
+        else:
+            group.append(region)
         prev = region
-    segments.append(_padded_region(start, prev.end, pad, len(audio)))
+    segments.extend(_character_segments(group, unit, pad, len(audio), config))
     return segments
 
 
@@ -195,6 +199,40 @@ def _char_gap_threshold(
         return _ms_to_samples(config.fixed_char_gap_ms, sample_rate)
     unit = estimate_unit_samples(active_regions)
     return max(1, int(round(unit * config.char_gap_units)))
+
+
+def _character_segments(
+    active_group: list[Region],
+    unit_samples: int,
+    pad: int,
+    audio_len: int,
+    config: SegmentConfig,
+) -> list[Region]:
+    if not active_group:
+        return []
+    if (
+        config.max_character_units is None
+        or config.max_character_units <= 0
+        or unit_samples <= 0
+        or len(active_group) <= 1
+    ):
+        return [_padded_region(active_group[0].start, active_group[-1].end, pad, audio_len)]
+
+    active_span = active_group[-1].end - active_group[0].start
+    if active_span <= unit_samples * config.max_character_units:
+        return [_padded_region(active_group[0].start, active_group[-1].end, pad, audio_len)]
+
+    gaps = [
+        (index, active_group[index].start - active_group[index - 1].end)
+        for index in range(1, len(active_group))
+    ]
+    split_index, _gap = max(gaps, key=lambda item: item[1])
+    left = active_group[:split_index]
+    right = active_group[split_index:]
+    return [
+        *_character_segments(left, unit_samples, pad, audio_len, config),
+        *_character_segments(right, unit_samples, pad, audio_len, config),
+    ]
 
 
 def _runs(mask: np.ndarray) -> list[Region]:

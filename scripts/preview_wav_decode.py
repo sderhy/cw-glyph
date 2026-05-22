@@ -70,6 +70,7 @@ def main() -> None:
         min_keydown_ms=args.min_keydown_ms,
         merge_gap_ms=args.merge_gap_ms,
         char_gap_units=args.char_gap_units,
+        max_character_units=args.max_character_units,
         pad_ms=args.pad_ms,
     )
     predictions = predict_audio_segments(
@@ -156,6 +157,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--min-keydown-ms", type=float, default=10.0)
     parser.add_argument("--merge-gap-ms", type=float, default=8.0)
     parser.add_argument("--char-gap-units", type=float, default=2.0)
+    parser.add_argument("--max-character-units", type=float, default=None)
     parser.add_argument("--pad-ms", type=float, default=20.0)
     parser.add_argument("--word-gap-ms", type=float, default=250.0)
     parser.add_argument("--word-gap-mode", choices=("fixed", "unit"), default="fixed")

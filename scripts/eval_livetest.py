@@ -10,6 +10,8 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
+
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -132,6 +134,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--label", default=None)
     parser.add_argument("--start", type=float, default=0.0)
     parser.add_argument("--duration", type=float, default=30.0)
+    parser.add_argument("--edge-pad-ms", type=float, default=0.0)
     parser.add_argument("--window", type=float, default=None)
     parser.add_argument("--hop", type=float, default=None)
     parser.add_argument("--max-windows", type=int, default=None)
@@ -144,6 +147,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--min-keydown-ms", type=float, default=10.0)
     parser.add_argument("--merge-gap-ms", type=float, default=8.0)
     parser.add_argument("--char-gap-units", type=float, default=2.0)
+    parser.add_argument("--max-character-units", type=float, default=None)
     parser.add_argument("--pad-ms", type=float, default=20.0)
     parser.add_argument("--word-gap-ms", type=float, default=250.0)
     parser.add_argument("--word-gap-mode", choices=("fixed", "unit"), default="fixed")
@@ -217,6 +221,10 @@ def _evaluate_window(
 ) -> dict:
     duration = args.window if args.window is not None else args.duration
     audio, offset_s = slice_audio(full_audio, sample_rate, start, duration)
+    original_duration_s = audio.size / sample_rate
+    edge_pad = _edge_pad_samples(args.edge_pad_ms, sample_rate)
+    if edge_pad:
+        audio = np.pad(audio, (edge_pad, edge_pad))
 
     center_hz = args.center_hz
     if args.auto_center:
@@ -235,6 +243,7 @@ def _evaluate_window(
         min_keydown_ms=args.min_keydown_ms,
         merge_gap_ms=args.merge_gap_ms,
         char_gap_units=args.char_gap_units,
+        max_character_units=args.max_character_units,
         pad_ms=args.pad_ms,
     )
     unit_samples = estimate_unit_samples(detect_active_regions(audio, sample_rate, segment_config))
@@ -306,8 +315,8 @@ def _evaluate_window(
         {
             "char": char,
             "score": score,
-            "start_s": offset_s + segment.start / sample_rate,
-            "end_s": offset_s + segment.end / sample_rate,
+            "start_s": offset_s + _segment_time_s(segment.start, sample_rate, edge_pad),
+            "end_s": offset_s + _segment_time_s(segment.end, sample_rate, edge_pad),
             "top_k": [
                 {"char": label, "score": top_score}
                 for label, top_score in topk_by_segment[index]
@@ -318,8 +327,9 @@ def _evaluate_window(
     return {
         "wav": str(wav_path),
         "start_s": offset_s,
-        "duration_s": audio.size / sample_rate,
+        "duration_s": original_duration_s,
         "audio_total_duration_s": full_audio.size / sample_rate,
+        "edge_pad_ms": args.edge_pad_ms,
         "center_hz": center_hz,
         "unit_ms": unit_samples / sample_rate * 1000.0 if unit_samples else None,
         "decoded": decoded,
@@ -370,6 +380,16 @@ def _topk_predictions(
         k=args.top_k,
         device=args.device,
     )
+
+
+def _segment_time_s(segment_sample: int, sample_rate: int, edge_pad: int) -> float:
+    return (segment_sample - edge_pad) / sample_rate
+
+
+def _edge_pad_samples(edge_pad_ms: float, sample_rate: int) -> int:
+    if edge_pad_ms < 0:
+        raise ValueError(f"edge-pad-ms must be non-negative, got {edge_pad_ms}")
+    return int(round(edge_pad_ms / 1000.0 * sample_rate))
 
 
 def _print_result(result: dict) -> None:

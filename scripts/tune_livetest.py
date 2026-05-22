@@ -18,23 +18,25 @@ def main() -> None:
         for char_gap_units in args.char_gap_units:
             for min_score in args.min_scores:
                 for min_segment_units in args.min_segment_units:
-                    result = _run_eval(
-                        args,
-                        threshold,
-                        char_gap_units,
-                        min_score,
-                        min_segment_units,
-                    )
-                    _handle_result(
-                        args,
-                        best_ref,
-                        results,
-                        threshold,
-                        char_gap_units,
-                        min_score,
-                        min_segment_units,
-                        result,
-                    )
+                    for max_character_units in args.max_character_units:
+                        result = _run_eval(
+                            args,
+                            threshold,
+                            char_gap_units,
+                            min_score,
+                            min_segment_units,
+                            max_character_units,
+                        )
+                        _handle_result(
+                            best_ref,
+                            results,
+                            threshold,
+                            char_gap_units,
+                            min_score,
+                            min_segment_units,
+                            max_character_units,
+                            result,
+                        )
     best = best_ref["best"]
     if best is not None:
         print(
@@ -43,6 +45,7 @@ def main() -> None:
             f"char_gap_units={best['char_gap_units']:g} "
             f"min_score={best['min_score']:g} "
             f"min_segment_units={best['min_segment_units']:g} "
+            f"max_character_units={best['max_character_units']} "
             f"cer={best['cer']:.3f} segments={best['segments']}"
         )
     if args.json_out:
@@ -53,22 +56,22 @@ def main() -> None:
 
 
 def _handle_result(
-    args: argparse.Namespace,
     best_ref: dict,
     results: list[dict],
     threshold: float,
     char_gap_units: float,
     min_score: float,
     min_segment_units: float,
+    max_character_units: float | None,
     result: dict,
 ) -> None:
-    del args
     results.append(
         {
             "threshold": threshold,
             "char_gap_units": char_gap_units,
             "min_score": min_score,
             "min_segment_units": min_segment_units,
+            "max_character_units": max_character_units,
             **result,
         }
     )
@@ -78,6 +81,7 @@ def _handle_result(
     print(
         f"threshold={threshold:g} char_gap_units={char_gap_units:g} "
         f"min_score={min_score:g} min_segment_units={min_segment_units:g} "
+        f"max_character_units={max_character_units} "
         f"cer={cer_text} score={metric_text} "
         f"segments={result['segments']} rejected={result['rejected_segments']}"
     )
@@ -88,6 +92,7 @@ def _handle_result(
             "char_gap_units": char_gap_units,
             "min_score": min_score,
             "min_segment_units": min_segment_units,
+            "max_character_units": max_character_units,
             "score": metric,
             **result,
         }
@@ -102,6 +107,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--char-gap-units", type=float, nargs="+", default=[1.7, 2.0, 2.3])
     parser.add_argument("--min-scores", type=float, nargs="+", default=[0.0])
     parser.add_argument("--min-segment-units", type=float, nargs="+", default=[0.0])
+    parser.add_argument("--max-character-units", type=float, nargs="+", default=[0.0])
     parser.add_argument("--threshold-mode", choices=("fixed", "adaptive"), default="fixed")
     parser.add_argument(
         "--scale-mode",
@@ -111,7 +117,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--canonical-units", type=float, default=24.0)
     parser.add_argument("--word-gap-mode", choices=("fixed", "unit"), default="fixed")
     parser.add_argument("--word-gap-units", type=float, default=4.5)
-    parser.add_argument("--window", type=float, default=30.0)
+    parser.add_argument("--duration", type=float, default=30.0)
+    parser.add_argument("--window", type=float, default=None)
     parser.add_argument("--hop", type=float, default=30.0)
     parser.add_argument("--max-windows", type=int, default=None)
     parser.add_argument("--match-mode", choices=("full", "best-substring"), default="full")
@@ -127,6 +134,7 @@ def _run_eval(
     char_gap_units: float,
     min_score: float,
     min_segment_units: float,
+    max_character_units: float | None,
 ) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
         cmd = [
@@ -150,10 +158,8 @@ def _run_eval(
             args.word_gap_mode,
             "--word-gap-units",
             str(args.word_gap_units),
-            "--window",
-            str(args.window),
-            "--hop",
-            str(args.hop),
+            "--duration",
+            str(args.duration),
             "--match-mode",
             args.match_mode,
             "--min-score",
@@ -165,6 +171,10 @@ def _run_eval(
             "--device",
             args.device,
         ]
+        if max_character_units is not None and max_character_units > 0:
+            cmd.extend(["--max-character-units", str(max_character_units)])
+        if args.window is not None:
+            cmd.extend(["--window", str(args.window), "--hop", str(args.hop)])
         if args.max_windows is not None:
             cmd.extend(["--max-windows", str(args.max_windows)])
         if args.auto_center:
