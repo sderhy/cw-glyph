@@ -72,6 +72,39 @@ def predict_envelopes(
 
 
 @torch.no_grad()
+def predict_envelopes_topk(
+    model: nn.Module,
+    envelopes: list[np.ndarray] | np.ndarray,
+    *,
+    classes: tuple[str, ...],
+    allowed_classes: tuple[str, ...] | None = None,
+    k: int = 3,
+    device: torch.device | str = "cpu",
+) -> list[list[tuple[str, float]]]:
+    """Predict top-k labels and confidence scores for fixed-length envelopes."""
+    x = torch.as_tensor(np.asarray(envelopes), dtype=torch.float32)
+    if x.numel() == 0:
+        return []
+    if x.ndim == 2:
+        x = x.unsqueeze(1)
+    logits = model(x.to(device))
+    if allowed_classes is not None:
+        logits = _mask_logits(logits, classes, allowed_classes)
+    probabilities = torch.softmax(logits, dim=1)
+    top_k = min(max(1, k), len(classes))
+    scores, labels = torch.topk(probabilities, k=top_k, dim=1)
+    out = []
+    for row_labels, row_scores in zip(labels.cpu().numpy(), scores.cpu().numpy()):
+        out.append(
+            [
+                (classes[int(label)], float(score))
+                for label, score in zip(row_labels, row_scores)
+            ]
+        )
+    return out
+
+
+@torch.no_grad()
 def predict_audio_segments(
     model: nn.Module,
     audio: np.ndarray,

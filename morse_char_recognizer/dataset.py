@@ -42,6 +42,12 @@ class SyntheticDatasetConfig:
     leading_silence_ms_range: Range = (0.0, 80.0)
     trailing_silence_ms_range: Range = (0.0, 80.0)
     snr_db_range: Range | None = None
+    qrn_rate_per_sec_range: Range = (0.0, 0.0)
+    qrn_amplitude_db_range: Range = (-12.0, -6.0)
+    qsb_rate_hz_range: Range = (0.0, 0.0)
+    qsb_depth_db_range: Range = (0.0, 0.0)
+    carrier_drift_hz_per_s_range: Range = (0.0, 0.0)
+    rx_filter_bw_range: Range | None = None
 
 
 @dataclass(frozen=True)
@@ -110,11 +116,30 @@ def synthesize_character_example(
     dash_dot_ratio = _uniform(rng, config.dash_dot_ratio_range)
     gap_inflation = _uniform(rng, config.gap_inflation_range)
 
-    channel = ChannelConfig(seed=channel_seed)
+    qrn_rate = _uniform(rng, config.qrn_rate_per_sec_range)
+    qrn_amplitude_db = _uniform(rng, config.qrn_amplitude_db_range)
+    qsb_rate = _uniform(rng, config.qsb_rate_hz_range)
+    qsb_depth = _uniform(rng, config.qsb_depth_db_range)
+    carrier_drift = _uniform(rng, config.carrier_drift_hz_per_s_range)
+    rx_filter_bw = (
+        _uniform(rng, config.rx_filter_bw_range)
+        if config.rx_filter_bw_range is not None
+        else None
+    )
+    channel = ChannelConfig(
+        qrn_rate_per_sec=qrn_rate,
+        qrn_amplitude_db=qrn_amplitude_db,
+        qsb_rate_hz=qsb_rate,
+        qsb_depth_db=qsb_depth,
+        carrier_drift_hz_per_s=carrier_drift,
+        rx_filter_bw=rx_filter_bw,
+        rx_filter_centre=freq,
+        seed=channel_seed,
+    )
     snr_db: float | None = None
     if config.snr_db_range is not None:
         snr_db = _uniform(rng, config.snr_db_range)
-        channel = ChannelConfig(snr_db=snr_db, seed=channel_seed)
+        channel.snr_db = snr_db
 
     audio = render(
         char,
@@ -162,6 +187,12 @@ def synthesize_character_example(
             "dash_dot_ratio": dash_dot_ratio,
             "gap_inflation": gap_inflation,
             "snr_db": snr_db,
+            "qrn_rate_per_sec": qrn_rate,
+            "qrn_amplitude_db": qrn_amplitude_db,
+            "qsb_rate_hz": qsb_rate,
+            "qsb_depth_db": qsb_depth,
+            "carrier_drift_hz_per_s": carrier_drift,
+            "rx_filter_bw": rx_filter_bw,
             "operator_seed": operator_seed,
             "channel_seed": channel_seed,
         },
@@ -190,10 +221,17 @@ def _validate_config(config: SyntheticDatasetConfig) -> None:
         "gap_inflation_range",
         "leading_silence_ms_range",
         "trailing_silence_ms_range",
+        "qrn_rate_per_sec_range",
+        "qrn_amplitude_db_range",
+        "qsb_rate_hz_range",
+        "qsb_depth_db_range",
+        "carrier_drift_hz_per_s_range",
     ):
         _validate_range(name, getattr(config, name))
     if config.snr_db_range is not None:
         _validate_range("snr_db_range", config.snr_db_range)
+    if config.rx_filter_bw_range is not None:
+        _validate_range("rx_filter_bw_range", config.rx_filter_bw_range)
 
 
 def _validate_range(name: str, value: Range) -> None:

@@ -109,6 +109,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--jitter-max", type=float, default=0.12)
     parser.add_argument("--snr-min", type=float, default=None)
     parser.add_argument("--snr-max", type=float, default=None)
+    parser.add_argument("--qrn-rate-min", type=float, default=0.0)
+    parser.add_argument("--qrn-rate-max", type=float, default=0.0)
+    parser.add_argument("--qrn-amplitude-min-db", type=float, default=-12.0)
+    parser.add_argument("--qrn-amplitude-max-db", type=float, default=-6.0)
+    parser.add_argument("--qsb-rate-min-hz", type=float, default=0.0)
+    parser.add_argument("--qsb-rate-max-hz", type=float, default=0.0)
+    parser.add_argument("--qsb-depth-min-db", type=float, default=0.0)
+    parser.add_argument("--qsb-depth-max-db", type=float, default=0.0)
+    parser.add_argument("--carrier-drift-min-hz-per-s", type=float, default=0.0)
+    parser.add_argument("--carrier-drift-max-hz-per-s", type=float, default=0.0)
+    parser.add_argument("--rx-filter-bw-min", type=float, default=None)
+    parser.add_argument("--rx-filter-bw-max", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -146,6 +158,15 @@ def _dataset_config(
         element_jitter_range=(0.0, args.jitter_max),
         gap_jitter_range=(0.0, args.jitter_max),
         snr_db_range=_snr_range(args),
+        qrn_rate_per_sec_range=(args.qrn_rate_min, args.qrn_rate_max),
+        qrn_amplitude_db_range=(args.qrn_amplitude_min_db, args.qrn_amplitude_max_db),
+        qsb_rate_hz_range=(args.qsb_rate_min_hz, args.qsb_rate_max_hz),
+        qsb_depth_db_range=(args.qsb_depth_min_db, args.qsb_depth_max_db),
+        carrier_drift_hz_per_s_range=(
+            args.carrier_drift_min_hz_per_s,
+            args.carrier_drift_max_hz_per_s,
+        ),
+        rx_filter_bw_range=_rx_filter_bw_range(args),
     )
 
 
@@ -155,6 +176,14 @@ def _snr_range(args: argparse.Namespace) -> tuple[float, float] | None:
     if args.snr_min is None or args.snr_max is None:
         raise ValueError("--snr-min and --snr-max must be provided together")
     return (args.snr_min, args.snr_max)
+
+
+def _rx_filter_bw_range(args: argparse.Namespace) -> tuple[float, float] | None:
+    if args.rx_filter_bw_min is None and args.rx_filter_bw_max is None:
+        return None
+    if args.rx_filter_bw_min is None or args.rx_filter_bw_max is None:
+        raise ValueError("--rx-filter-bw-min and --rx-filter-bw-max must be provided together")
+    return (args.rx_filter_bw_min, args.rx_filter_bw_max)
 
 
 def _device(name: str) -> torch.device:

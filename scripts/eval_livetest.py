@@ -20,6 +20,7 @@ from morse_char_recognizer.inference import (
     load_checkpoint_model,
     predict_audio_segments,
     predict_envelopes,
+    predict_envelopes_topk,
 )
 from morse_char_recognizer.live import (
     alignment_summary,
@@ -165,6 +166,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--jsonl-out", default=None)
     parser.add_argument("--alignment-sample-limit", type=int, default=80)
+    parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument(
         "--match-mode",
         choices=("full", "best-substring"),
@@ -289,14 +291,29 @@ def _evaluate_window(
         else None
     )
     scores = [score for _char, score, _segment in predictions]
+    topk_by_segment = _topk_predictions(
+        model,
+        audio,
+        sample_rate,
+        predictions,
+        classes,
+        local_envelope,
+        allowed_classes,
+        unit_samples,
+        args,
+    )
     detailed_predictions = [
         {
             "char": char,
             "score": score,
             "start_s": offset_s + segment.start / sample_rate,
             "end_s": offset_s + segment.end / sample_rate,
+            "top_k": [
+                {"char": label, "score": top_score}
+                for label, top_score in topk_by_segment[index]
+            ],
         }
-        for char, score, segment in predictions
+        for index, (char, score, segment) in enumerate(predictions)
     ]
     return {
         "wav": str(wav_path),
@@ -322,6 +339,37 @@ def _evaluate_window(
         "mean_score": sum(scores) / len(scores) if scores else 0.0,
         "predictions": detailed_predictions,
     }
+
+
+def _topk_predictions(
+    model,
+    audio,
+    sample_rate: int,
+    predictions,
+    classes: tuple[str, ...],
+    envelope,
+    allowed_classes: tuple[str, ...],
+    unit_samples: int,
+    args: argparse.Namespace,
+) -> list[list[tuple[str, float]]]:
+    if args.top_k <= 1 or not predictions:
+        return [[] for _prediction in predictions]
+    segments = [segment for _char, _score, segment in predictions]
+    envs = extract_segment_envelopes(
+        audio,
+        sample_rate,
+        segments,
+        envelope,
+        unit_samples=unit_samples if envelope.scale_mode == "unit" else None,
+    )
+    return predict_envelopes_topk(
+        model,
+        envs,
+        classes=classes,
+        allowed_classes=allowed_classes,
+        k=args.top_k,
+        device=args.device,
+    )
 
 
 def _print_result(result: dict) -> None:

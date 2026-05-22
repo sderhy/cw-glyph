@@ -49,6 +49,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--jitter-max", type=float, default=0.12)
     parser.add_argument("--snr-min", type=float, default=None)
     parser.add_argument("--snr-max", type=float, default=None)
+    parser.add_argument("--qrn-rate-min", type=float, default=0.0)
+    parser.add_argument("--qrn-rate-max", type=float, default=0.0)
+    parser.add_argument("--qsb-rate-min-hz", type=float, default=0.0)
+    parser.add_argument("--qsb-rate-max-hz", type=float, default=0.0)
+    parser.add_argument("--qsb-depth-min-db", type=float, default=0.0)
+    parser.add_argument("--qsb-depth-max-db", type=float, default=0.0)
+    parser.add_argument("--carrier-drift-min-hz-per-s", type=float, default=0.0)
+    parser.add_argument("--carrier-drift-max-hz-per-s", type=float, default=0.0)
     parser.add_argument("--sweep-snr", type=float, nargs="*", default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--show-confusions", type=int, default=12)
@@ -68,6 +76,13 @@ def _evaluate(args, model, classes, envelope, snr_range):
             element_jitter_range=(0.0, args.jitter_max),
             gap_jitter_range=(0.0, args.jitter_max),
             snr_db_range=snr_range,
+            qrn_rate_per_sec_range=(args.qrn_rate_min, args.qrn_rate_max),
+            qsb_rate_hz_range=(args.qsb_rate_min_hz, args.qsb_rate_max_hz),
+            qsb_depth_db_range=(args.qsb_depth_min_db, args.qsb_depth_max_db),
+            carrier_drift_hz_per_s_range=(
+                args.carrier_drift_min_hz_per_s,
+                args.carrier_drift_max_hz_per_s,
+            ),
         )
     )
     envelopes = []
