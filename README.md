@@ -92,6 +92,36 @@ python scripts/eval_livetest.py \
   --hop 30
 ```
 
+## Current Results
+
+The best measured configuration so far is the real-vocabulary CNN with
+unit-scaled glyph extraction:
+
+```text
+checkpoint: outputs/glyph52_real_unit32_cnn_snr5_25.pt
+scale mode: unit
+canonical units: 32
+FAV22 first 8 x 30 s windows: ~0.926 weighted character accuracy
+g3ses/C1.wav: decodes "R QRL?"
+g6pz/G1.wav: ~0.787 best-substring character accuracy
+```
+
+These numbers are development measurements from local labelled audio under
+`livetests/`, which is not published in this repository.
+
+## Roadmap
+
+- Improve real-audio segmentation with local WPM/dot-unit estimation, adaptive
+  thresholding, and better word-gap estimation.
+- Calibrate or replace naive multi-checkpoint ensembling. Raw CNN confidence
+  scores are not comparable across differently normalized models.
+- Expand and document labelled livetest evaluation, including alignment reports
+  that identify weak segments and repeated confusions.
+- Add a documented checkpoint release path. Model files are generated artifacts
+  and are not committed to the source tree.
+- Investigate a 2D spectrogram/image baseline for comparison with the current
+  1D envelope glyph approach.
+
 ## Data And Artifacts
 
 `livetests/` and `outputs/` are intentionally ignored. Real recordings,
