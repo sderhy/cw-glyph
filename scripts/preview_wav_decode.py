@@ -18,6 +18,7 @@ from morse_char_recognizer.audio_io import read_wav_mono
 from morse_char_recognizer.classes import CLASS_PRESETS, parse_class_spec
 from morse_char_recognizer.features import amplitude_envelope
 from morse_char_recognizer.inference import (
+    filter_short_segment_predictions,
     join_segment_predictions,
     load_checkpoint_model,
     predict_audio_segments,
@@ -59,8 +60,13 @@ def main() -> None:
         center_hz = estimate_carrier_hz(audio, sample_rate, args.freq_min, args.freq_max)
     if center_hz is not None:
         envelope = replace(envelope, bandpass_center_hz=center_hz)
+    if args.bandpass_width_hz is not None:
+        envelope = replace(envelope, bandpass_width_hz=args.bandpass_width_hz)
 
     segment_config = SegmentConfig(
+        bandpass_center_hz=envelope.bandpass_center_hz,
+        bandpass_width_hz=envelope.bandpass_width_hz,
+        noise_floor_percentile=envelope.noise_floor_percentile,
         threshold_mode=args.threshold_mode,
         threshold=args.threshold,
         adaptive_window_ms=args.adaptive_window_ms,
@@ -69,6 +75,8 @@ def main() -> None:
         adaptive_min_threshold=args.adaptive_min_threshold,
         min_keydown_ms=args.min_keydown_ms,
         merge_gap_ms=args.merge_gap_ms,
+        min_unit_ms=args.min_unit_ms,
+        max_unit_ms=args.max_unit_ms,
         char_gap_units=args.char_gap_units,
         max_character_units=args.max_character_units,
         pad_ms=args.pad_ms,
@@ -90,13 +98,22 @@ def main() -> None:
             if score >= args.min_score
         ]
     active_regions = detect_active_regions(audio, sample_rate, segment_config)
-    unit_samples = estimate_unit_samples(active_regions)
+    unit_samples = estimate_unit_samples(
+        active_regions,
+        sample_rate,
+        min_unit_ms=segment_config.min_unit_ms,
+        max_unit_ms=segment_config.max_unit_ms,
+        histogram_bin_ms=segment_config.unit_histogram_bin_ms,
+    )
     if args.min_segment_units > 0 and unit_samples > 0:
-        predictions = [
-            (char, score, segment)
-            for char, score, segment in predictions
-            if segment.duration >= args.min_segment_units * unit_samples
-        ]
+        predictions = filter_short_segment_predictions(
+            predictions,
+            unit_samples=unit_samples,
+            min_segment_units=args.min_segment_units,
+            short_class_min_segment_units=args.short_class_min_segment_units,
+            short_classes=_short_classes(args.short_classes),
+            short_class_min_score=args.short_class_min_score,
+        )
     env = amplitude_envelope(
         audio,
         sample_rate,
@@ -156,6 +173,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--adaptive-min-threshold", type=float, default=0.03)
     parser.add_argument("--min-keydown-ms", type=float, default=10.0)
     parser.add_argument("--merge-gap-ms", type=float, default=8.0)
+    parser.add_argument("--min-unit-ms", type=float, default=0.0)
+    parser.add_argument("--max-unit-ms", type=float, default=140.0)
     parser.add_argument("--char-gap-units", type=float, default=2.0)
     parser.add_argument("--max-character-units", type=float, default=None)
     parser.add_argument("--pad-ms", type=float, default=20.0)
@@ -172,13 +191,21 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--auto-center", action="store_true")
     parser.add_argument("--freq-min", type=float, default=250.0)
     parser.add_argument("--freq-max", type=float, default=1200.0)
+    parser.add_argument("--bandpass-width-hz", type=float, default=None)
     parser.add_argument("--spectrogram-max-hz", type=float, default=1400.0)
     parser.add_argument("--allowed-class-preset", choices=tuple(CLASS_PRESETS), default="real")
     parser.add_argument("--allowed-classes", default=None)
     parser.add_argument("--min-score", type=float, default=0.0)
     parser.add_argument("--min-segment-units", type=float, default=0.0)
+    parser.add_argument("--short-class-min-segment-units", type=float, default=None)
+    parser.add_argument("--short-classes", default="E,T")
+    parser.add_argument("--short-class-min-score", type=float, default=0.0)
     parser.add_argument("--device", default="cpu")
     return parser.parse_args()
+
+
+def _short_classes(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def _plot_preview(

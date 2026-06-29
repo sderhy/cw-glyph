@@ -123,7 +123,7 @@ def predict_audio_segments(
     unit_samples = None
     if envelope.scale_mode == "unit":
         active = detect_active_regions(audio, sample_rate, segment_config)
-        unit_samples = estimate_unit_samples(active)
+        unit_samples = estimate_unit_samples(active, sample_rate)
     envelopes = extract_segment_envelopes(
         audio,
         sample_rate,
@@ -142,6 +142,40 @@ def predict_audio_segments(
         (classes[int(label)], float(score), segment)
         for label, score, segment in zip(labels, scores, segments)
     ]
+
+
+def filter_short_segment_predictions(
+    predictions: list[tuple[str, float, Region]],
+    *,
+    unit_samples: int,
+    min_segment_units: float,
+    short_class_min_segment_units: float | None = None,
+    short_classes: tuple[str, ...] = ("E", "T"),
+    short_class_min_score: float = 0.0,
+) -> list[tuple[str, float, Region]]:
+    """Filter short predictions while allowing confident one-element glyphs."""
+    if min_segment_units <= 0 or unit_samples <= 0:
+        return predictions
+
+    regular_min = min_segment_units * unit_samples
+    short_min = (
+        regular_min
+        if short_class_min_segment_units is None
+        else short_class_min_segment_units * unit_samples
+    )
+    short_class_set = set(short_classes)
+    out: list[tuple[str, float, Region]] = []
+    for char, score, segment in predictions:
+        if segment.duration >= regular_min:
+            out.append((char, score, segment))
+            continue
+        if (
+            char in short_class_set
+            and segment.duration >= short_min
+            and score >= short_class_min_score
+        ):
+            out.append((char, score, segment))
+    return out
 
 
 def join_segment_predictions(

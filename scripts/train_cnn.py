@@ -32,6 +32,7 @@ def main() -> None:
         length=args.length,
         scale_mode=args.scale_mode,
         canonical_units=args.canonical_units,
+        binarize_threshold=args.envelope_binarize_threshold,
     )
     torch.manual_seed(args.seed)
 
@@ -107,6 +108,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--wpm-min", type=float, default=12.0)
     parser.add_argument("--wpm-max", type=float, default=30.0)
     parser.add_argument("--jitter-max", type=float, default=0.12)
+    parser.add_argument("--dash-dot-ratio-min", type=float, default=2.7)
+    parser.add_argument("--dash-dot-ratio-max", type=float, default=3.4)
+    parser.add_argument("--gap-inflation-min", type=float, default=0.9)
+    parser.add_argument("--gap-inflation-max", type=float, default=1.25)
+    parser.add_argument("--rise-ms-min", type=float, default=2.0)
+    parser.add_argument("--rise-ms-max", type=float, default=8.0)
+    parser.add_argument("--stroke-amplitude-jitter-max", type=float, default=0.0)
+    parser.add_argument("--envelope-binarize-threshold", type=float, default=None)
     parser.add_argument("--snr-min", type=float, default=None)
     parser.add_argument("--snr-max", type=float, default=None)
     parser.add_argument("--qrn-rate-min", type=float, default=0.0)
@@ -155,8 +164,12 @@ def _dataset_config(
         envelope=envelope,
         seed=seed,
         wpm_range=(args.wpm_min, args.wpm_max),
+        rise_ms_range=(args.rise_ms_min, args.rise_ms_max),
         element_jitter_range=(0.0, args.jitter_max),
         gap_jitter_range=(0.0, args.jitter_max),
+        dash_dot_ratio_range=(args.dash_dot_ratio_min, args.dash_dot_ratio_max),
+        gap_inflation_range=(args.gap_inflation_min, args.gap_inflation_max),
+        stroke_amplitude_jitter_range=(0.0, args.stroke_amplitude_jitter_max),
         snr_db_range=_snr_range(args),
         qrn_rate_per_sec_range=(args.qrn_rate_min, args.qrn_rate_max),
         qrn_amplitude_db_range=(args.qrn_amplitude_min_db, args.qrn_amplitude_max_db),

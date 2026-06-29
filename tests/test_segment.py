@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from morse_char_recognizer.segment import SegmentConfig, detect_active_regions, segment_characters
+from morse_char_recognizer.segment import (
+    Region,
+    SegmentConfig,
+    detect_active_regions,
+    estimate_unit_samples,
+    segment_characters,
+)
 from morse_synth.core import synthesize
 
 
@@ -25,6 +31,33 @@ def test_segment_characters_splits_clean_word() -> None:
     assert len(segments) == 3
     assert segments[0].start < segments[0].end <= segments[1].start
     assert segments[1].start < segments[1].end <= segments[2].start
+
+
+def test_detect_active_regions_uses_configured_bandpass_center() -> None:
+    audio = synthesize("E", wpm=20, freq=900.0, sample_rate=8000, rise_ms=1.0)
+
+    regions = detect_active_regions(
+        audio,
+        8000,
+        SegmentConfig(bandpass_center_hz=900.0, bandpass_width_hz=200.0),
+    )
+
+    assert len(regions) == 1
+
+
+def test_estimate_unit_samples_ignores_implausibly_short_fragments() -> None:
+    sample_rate = 8000
+    durations_ms = [11, 14, 19, 22, 56, 58, 61, 64, 171, 183]
+    cursor = 0
+    regions = []
+    for duration_ms in durations_ms:
+        duration = int(round(duration_ms / 1000.0 * sample_rate))
+        regions.append(Region(cursor, cursor + duration))
+        cursor += duration + int(round(0.05 * sample_rate))
+
+    unit_ms = estimate_unit_samples(regions, sample_rate) / sample_rate * 1000.0
+
+    assert 55.0 <= unit_ms <= 65.0
 
 
 def test_adaptive_threshold_recovers_faded_keydowns() -> None:

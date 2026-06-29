@@ -5,8 +5,9 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-from morse_char_recognizer.inference import predict_envelopes
+from morse_char_recognizer.inference import filter_short_segment_predictions, predict_envelopes
 from morse_char_recognizer.model import SmallCnn1d
+from morse_char_recognizer.segment import Region
 
 
 def test_predict_envelopes_returns_labels_and_scores() -> None:
@@ -32,3 +33,21 @@ def test_predict_envelopes_can_mask_allowed_classes() -> None:
     )
 
     assert labels.tolist() == [1, 1, 1]
+
+
+def test_filter_short_segment_predictions_keeps_confident_one_element_classes() -> None:
+    predictions = [
+        ("E", 0.95, Region(0, 60)),
+        ("I", 0.95, Region(100, 160)),
+        ("A", 0.40, Region(200, 360)),
+    ]
+
+    filtered = filter_short_segment_predictions(
+        predictions,
+        unit_samples=50,
+        min_segment_units=2.2,
+        short_class_min_segment_units=0.8,
+        short_class_min_score=0.8,
+    )
+
+    assert [char for char, _score, _segment in filtered] == ["E", "A"]

@@ -35,6 +35,9 @@ class SegmentConfig:
 
     method: EnvelopeMethod = "hilbert"
     smoothing_ms: float = 4.0
+    bandpass_center_hz: float | None = 600.0
+    bandpass_width_hz: float = 500.0
+    noise_floor_percentile: float = 20.0
     threshold_mode: Literal["fixed", "adaptive"] = "fixed"
     threshold: float = 0.18
     adaptive_window_ms: float = 650.0
@@ -43,6 +46,9 @@ class SegmentConfig:
     adaptive_min_threshold: float = 0.03
     min_keydown_ms: float = 10.0
     merge_gap_ms: float = 8.0
+    min_unit_ms: float = 0.0
+    max_unit_ms: float = 140.0
+    unit_histogram_bin_ms: float = 10.0
     char_gap_units: float = 2.0
     fixed_char_gap_ms: float | None = None
     max_character_units: float | None = None
@@ -61,6 +67,9 @@ def detect_active_regions(
         sample_rate,
         method=config.method,
         smoothing_ms=config.smoothing_ms,
+        bandpass_center_hz=config.bandpass_center_hz,
+        bandpass_width_hz=config.bandpass_width_hz,
+        noise_floor_percentile=config.noise_floor_percentile,
     )
     regions = _runs(_active_mask(envelope, sample_rate, config))
     regions = _merge_close_regions(regions, _ms_to_samples(config.merge_gap_ms, sample_rate))
@@ -82,7 +91,13 @@ def segment_characters(
     gap_threshold = _char_gap_threshold(active, sample_rate, config)
     pad = _ms_to_samples(config.pad_ms, sample_rate)
 
-    unit = estimate_unit_samples(active)
+    unit = estimate_unit_samples(
+        active,
+        sample_rate,
+        min_unit_ms=config.min_unit_ms,
+        max_unit_ms=config.max_unit_ms,
+        histogram_bin_ms=config.unit_histogram_bin_ms,
+    )
     segments: list[Region] = []
     group: list[Region] = [active[0]]
     prev = active[0]
@@ -123,11 +138,36 @@ def extract_segment_envelopes(
     ]
 
 
-def estimate_unit_samples(active_regions: list[Region]) -> int:
+def estimate_unit_samples(
+    active_regions: list[Region],
+    sample_rate: int | None = None,
+    *,
+    min_unit_ms: float = 35.0,
+    max_unit_ms: float = 140.0,
+    histogram_bin_ms: float = 10.0,
+) -> int:
     """Estimate one Morse dot unit from detected keydown durations."""
     if not active_regions:
         return 0
     durations = np.array([region.duration for region in active_regions], dtype=np.float32)
+
+    if sample_rate is not None and min_unit_ms > 0 and max_unit_ms > min_unit_ms:
+        min_unit = _ms_to_samples(min_unit_ms, sample_rate)
+        max_unit = _ms_to_samples(max_unit_ms, sample_rate)
+        plausible = durations[(durations >= min_unit) & (durations <= max_unit)]
+        if plausible.size >= 3:
+            bin_size = max(1, _ms_to_samples(histogram_bin_ms, sample_rate))
+            bins = np.arange(min_unit, max_unit + bin_size, bin_size, dtype=np.float32)
+            if bins.size >= 2:
+                counts, edges = np.histogram(plausible, bins=bins)
+                if counts.size and int(counts.max()) > 0:
+                    peak = int(np.argmax(counts))
+                    in_peak = plausible[
+                        (plausible >= edges[peak]) & (plausible < edges[peak + 1])
+                    ]
+                    if in_peak.size:
+                        return max(1, int(round(float(np.median(in_peak)))))
+
     short = durations[durations <= np.percentile(durations, 45.0)]
     if short.size >= 3:
         estimate = float(np.median(short))
@@ -197,7 +237,13 @@ def _char_gap_threshold(
 ) -> int:
     if config.fixed_char_gap_ms is not None:
         return _ms_to_samples(config.fixed_char_gap_ms, sample_rate)
-    unit = estimate_unit_samples(active_regions)
+    unit = estimate_unit_samples(
+        active_regions,
+        sample_rate,
+        min_unit_ms=config.min_unit_ms,
+        max_unit_ms=config.max_unit_ms,
+        histogram_bin_ms=config.unit_histogram_bin_ms,
+    )
     return max(1, int(round(unit * config.char_gap_units)))
 
 

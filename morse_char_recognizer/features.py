@@ -27,6 +27,7 @@ class EnvelopeConfig:
     noise_floor_percentile: float = 20.0
     scale_mode: Literal["stretch", "unit"] = "stretch"
     canonical_units: float = 24.0
+    binarize_threshold: float | None = None
 
 
 def extract_envelope(
@@ -62,7 +63,7 @@ def extract_envelope(
     envelope = _trim_silence(envelope, sample_rate, config.trim_threshold, config.trim_pad_ms)
     envelope = resample(envelope, config.length).astype(np.float32)
     envelope = np.maximum(envelope, 0.0)
-    return _normalize(envelope, config.normalize)
+    return _finish_envelope(envelope, config)
 
 
 def extract_unit_scaled_envelope(
@@ -98,7 +99,7 @@ def extract_unit_scaled_envelope(
     envelope = _center_or_crop(envelope, target_len)
     envelope = resample(envelope, config.length).astype(np.float32)
     envelope = np.maximum(envelope, 0.0)
-    return _normalize(envelope, config.normalize)
+    return _finish_envelope(envelope, config)
 
 
 def amplitude_envelope(
@@ -152,6 +153,12 @@ def _validate_config(config: EnvelopeConfig, sample_rate: int) -> None:
         )
     if config.canonical_units <= 0:
         raise ValueError(f"canonical_units must be positive, got {config.canonical_units}")
+    binarize_threshold = getattr(config, "binarize_threshold", None)
+    if binarize_threshold is not None and not 0 <= binarize_threshold <= 1:
+        raise ValueError(
+            "binarize_threshold must be in [0, 1] or None, "
+            f"got {binarize_threshold}"
+        )
 
 
 def _raw_envelope(audio: np.ndarray, method: EnvelopeMethod) -> np.ndarray:
@@ -248,3 +255,11 @@ def _normalize(envelope: np.ndarray, mode: NormalizeMode) -> np.ndarray:
     if scale <= 1e-12:
         return np.zeros_like(envelope, dtype=np.float32)
     return (envelope / scale).astype(np.float32)
+
+
+def _finish_envelope(envelope: np.ndarray, config: EnvelopeConfig) -> np.ndarray:
+    envelope = _normalize(envelope, config.normalize)
+    binarize_threshold = getattr(config, "binarize_threshold", None)
+    if binarize_threshold is None:
+        return envelope
+    return (envelope >= binarize_threshold).astype(np.float32)

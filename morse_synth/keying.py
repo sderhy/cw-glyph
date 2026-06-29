@@ -32,11 +32,18 @@ class KeyingConfig:
         rise_ms:             Edge rise/fall time in ms. Ignored for "rect".
         chirp_hz_per_unit:   Linear frequency sweep during each keydown,
                              in Hz per dot-unit. 0 = no chirp.
+        amplitude_jitter:    Stddev of per-keydown amplitude variation. 0 keeps
+                             every keydown at the same level; larger values
+                             simulate uneven hand/keyer strokes before channel
+                             fading is applied.
+        seed:                Optional seed for reproducible amplitude jitter.
     """
 
     shape: Shape = "raised_cosine"
     rise_ms: float = 5.0
     chirp_hz_per_unit: float = 0.0
+    amplitude_jitter: float = 0.0
+    seed: int | None = None
 
 
 def _edge_kernel(rise_samples: int, shape: Shape) -> np.ndarray:
@@ -97,12 +104,17 @@ def render_events(
     n_tail = int(round(tail_ms / 1000.0 * sample_rate))
     n_total = n_body + n_tail
 
+    rng = np.random.default_rng(keying.seed)
     envelope = np.zeros(n_total, dtype=np.float32)
     for (is_on, _dur), start, end in zip(
         events, cumulative_samples[:-1], cumulative_samples[1:]
     ):
         if is_on:
-            envelope[start:end] = 1.0
+            level = 1.0
+            if keying.amplitude_jitter > 0:
+                level = float(rng.normal(1.0, keying.amplitude_jitter))
+                level = float(np.clip(level, 0.15, 1.6))
+            envelope[start:end] = level
 
     # Shape the edges (skip for "rect").
     if keying.shape != "rect" and keying.rise_ms > 0:

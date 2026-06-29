@@ -9,4 +9,5 @@ build/
 *.egg-info/
 outputs/
 livetests/
+recovered/
 HANDOFF.md

@@ -88,3 +88,22 @@ def test_dataset_can_synthesize_prosign_class() -> None:
 
     assert example.char == "<KN>"
     assert example.envelope.shape == (64,)
+
+
+def test_dataset_records_stroke_amplitude_jitter() -> None:
+    dataset = SyntheticMorseCharacterDataset(
+        SyntheticDatasetConfig(
+            classes=("B",),
+            samples_per_class=1,
+            envelope=EnvelopeConfig(length=64),
+            stroke_amplitude_jitter_range=(0.25, 0.25),
+            seed=11,
+        )
+    )
+
+    example = dataset[0]
+    again = dataset[0]
+
+    assert example.params["stroke_amplitude_jitter"] == pytest.approx(0.25)
+    assert example.params["keying_seed"] == again.params["keying_seed"]
+    assert np.array_equal(example.audio, again.audio)

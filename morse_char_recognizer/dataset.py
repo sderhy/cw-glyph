@@ -34,6 +34,7 @@ class SyntheticDatasetConfig:
     freq_range: Range = (500.0, 750.0)
     amplitude_range: Range = (0.35, 0.9)
     rise_ms_range: Range = (2.0, 8.0)
+    stroke_amplitude_jitter_range: Range = (0.0, 0.0)
     tail_ms_range: Range = (35.0, 90.0)
     element_jitter_range: Range = (0.0, 0.12)
     gap_jitter_range: Range = (0.0, 0.12)
@@ -105,11 +106,13 @@ def synthesize_character_example(
     _validate_config(config)
 
     operator_seed = int(rng.integers(0, np.iinfo(np.int32).max))
+    keying_seed = int(rng.integers(0, np.iinfo(np.int32).max))
     channel_seed = int(rng.integers(0, np.iinfo(np.int32).max))
     wpm = _uniform(rng, config.wpm_range)
     freq = _uniform(rng, config.freq_range)
     amplitude = _uniform(rng, config.amplitude_range)
     rise_ms = _uniform(rng, config.rise_ms_range)
+    stroke_amplitude_jitter = _uniform(rng, config.stroke_amplitude_jitter_range)
     tail_ms = _uniform(rng, config.tail_ms_range)
     element_jitter = _uniform(rng, config.element_jitter_range)
     gap_jitter = _uniform(rng, config.gap_jitter_range)
@@ -151,7 +154,11 @@ def synthesize_character_example(
             gap_inflation=gap_inflation,
             seed=operator_seed,
         ),
-        keying=KeyingConfig(rise_ms=rise_ms),
+        keying=KeyingConfig(
+            rise_ms=rise_ms,
+            amplitude_jitter=stroke_amplitude_jitter,
+            seed=keying_seed,
+        ),
         channel=channel,
         freq=freq,
         sample_rate=config.sample_rate,
@@ -181,6 +188,7 @@ def synthesize_character_example(
             "freq": freq,
             "amplitude": amplitude,
             "rise_ms": rise_ms,
+            "stroke_amplitude_jitter": stroke_amplitude_jitter,
             "tail_ms": tail_ms,
             "element_jitter": element_jitter,
             "gap_jitter": gap_jitter,
@@ -194,6 +202,7 @@ def synthesize_character_example(
             "carrier_drift_hz_per_s": carrier_drift,
             "rx_filter_bw": rx_filter_bw,
             "operator_seed": operator_seed,
+            "keying_seed": keying_seed,
             "channel_seed": channel_seed,
         },
     )
@@ -214,6 +223,7 @@ def _validate_config(config: SyntheticDatasetConfig) -> None:
         "freq_range",
         "amplitude_range",
         "rise_ms_range",
+        "stroke_amplitude_jitter_range",
         "tail_ms_range",
         "element_jitter_range",
         "gap_jitter_range",

@@ -42,3 +42,24 @@ def test_extract_unit_scaled_envelope_returns_fixed_vector() -> None:
     assert envelope.shape == (96,)
     assert envelope.dtype == np.float32
     assert np.max(envelope) == pytest.approx(1.0)
+
+
+def test_extract_envelope_can_binarize_after_normalization() -> None:
+    audio = synthesize("A", sample_rate=8000)
+    envelope = extract_envelope(
+        audio,
+        8000,
+        EnvelopeConfig(length=128, binarize_threshold=0.35),
+    )
+
+    assert set(np.unique(envelope)).issubset({0.0, 1.0})
+    assert np.any(envelope == 1.0)
+
+
+def test_extract_envelope_rejects_invalid_binarize_threshold() -> None:
+    with pytest.raises(ValueError):
+        extract_envelope(
+            np.ones(100, dtype=np.float32),
+            8000,
+            EnvelopeConfig(binarize_threshold=1.5),
+        )
