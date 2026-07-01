@@ -16,6 +16,7 @@ the way a `min-segment-units` noise filter drops them.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .morse_table import INVERSE_PROSIGNS, INVERSE_TABLE
@@ -70,16 +71,53 @@ def classify_elements(
     return ["-" if r.duration >= threshold else "." for r in regions]
 
 
+def filter_regions(
+    regions: list[Region], unit_samples: int, min_element_units: float
+) -> list[Region]:
+    """Drop sub-unit specks that would otherwise become spurious dits."""
+    if unit_samples > 0 and min_element_units > 0:
+        floor = min_element_units * unit_samples
+        return [r for r in regions if r.duration >= floor]
+    return list(regions)
+
+
+def enumerate_valid_spans(
+    symbols: list[str], *, max_elements_per_char: int, prefer_letters: bool = True
+) -> list[tuple[int, int, str]]:
+    """List every ``(j, i, char)`` where ``symbols[j:i]`` is a valid Morse glyph.
+
+    These are exactly the character candidates the DP in
+    :func:`beam_decode_regions` considers, so an external scorer (e.g. a CNN)
+    can be evaluated on the same spans and indexed by ``(j, i)``.
+    """
+    n = len(symbols)
+    spans: list[tuple[int, int, str]] = []
+    for i in range(1, n + 1):
+        for length in range(1, min(max_elements_per_char, i) + 1):
+            j = i - length
+            char = _lookup("".join(symbols[j:i]), prefer_letters=prefer_letters)
+            if char is not None:
+                spans.append((j, i, char))
+    return spans
+
+
 def beam_decode_regions(
     regions: list[Region],
     unit_samples: int,
     config: BeamConfig | None = None,
+    *,
+    span_score: Callable[[int, int, str], float] | None = None,
 ) -> str:
-    """Decode a character string from detected elements by exact DP segmentation."""
+    """Decode a character string from detected elements by exact DP segmentation.
+
+    ``span_score(j, i, char)`` is an optional extra term (already weighted) added
+    to the score of grouping the *filtered* elements ``[j:i)`` into ``char`` — the
+    hook used to fold in CNN glyph log-probabilities. Its ``(j, i)`` indices are
+    into the region list *after* the ``min_element_units`` noise filter, matching
+    :func:`enumerate_valid_spans` on the same filtered regions.
+    """
     config = config or BeamConfig()
-    if unit_samples > 0 and config.min_element_units > 0:
-        floor = config.min_element_units * unit_samples
-        regions = [r for r in regions if r.duration >= floor]
+    regions = filter_regions(regions, unit_samples, config.min_element_units)
     n = len(regions)
     if n == 0 or unit_samples <= 0:
         return ""
@@ -105,6 +143,8 @@ def beam_decode_regions(
             if char is None:
                 continue
             s = score[j] - config.char_cost
+            if span_score is not None:
+                s += span_score(j, i, char)
             # penalise over-long gaps kept *inside* this character
             for k in range(j, i - 1):
                 s -= config.w_internal * max(0.0, gaps[k] - config.boundary_threshold)
