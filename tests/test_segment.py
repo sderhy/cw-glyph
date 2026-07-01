@@ -7,11 +7,27 @@ import numpy as np
 from morse_char_recognizer.segment import (
     Region,
     SegmentConfig,
+    _hysteresis_mask,
     detect_active_regions,
     estimate_unit_samples,
     segment_characters,
 )
 from morse_synth.core import synthesize
+
+
+def test_hysteresis_keeps_weak_body_and_drops_peakless_noise() -> None:
+    # run A peaks above `high` with a weak tail above `low` -> kept whole;
+    # run B never reaches `high` -> dropped entirely.
+    env = np.array([0.0, 0.15, 0.30, 0.15, 0.0, 0.15, 0.15, 0.0, 0.30, 0.0], dtype=np.float32)
+    mask = _hysteresis_mask(env, high=0.22, low=0.12)
+    kept = set(np.flatnonzero(mask).tolist())
+    assert kept == {1, 2, 3, 8}
+
+
+def test_hysteresis_falls_back_to_fixed_when_low_not_below_high() -> None:
+    env = np.array([0.0, 0.25, 0.10, 0.30], dtype=np.float32)
+    mask = _hysteresis_mask(env, high=0.22, low=0.22)
+    assert mask.tolist() == (env >= 0.22).tolist()
 
 
 def test_detect_active_regions_finds_morse_elements() -> None:

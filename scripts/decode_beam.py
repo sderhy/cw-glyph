@@ -32,8 +32,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--start", type=float, default=0.0)
     p.add_argument("--duration", type=float, default=0.0, help="0 = whole file")
     # segmentation / element detection
-    p.add_argument("--threshold", type=float, default=0.18)
-    p.add_argument("--threshold-mode", choices=["fixed", "adaptive"], default="fixed")
+    p.add_argument("--threshold", type=float, default=0.22)
+    p.add_argument("--threshold-mode", choices=["fixed", "adaptive", "hysteresis"], default="hysteresis")
+    p.add_argument("--hysteresis-low", type=float, default=0.12)
     p.add_argument("--bandpass-center-hz", type=float, default=None)
     p.add_argument("--bandpass-width-hz", type=float, default=100.0)
     p.add_argument("--auto-center", action="store_true")
@@ -72,6 +73,7 @@ def main() -> None:
     segment_config = SegmentConfig(
         threshold_mode=args.threshold_mode,
         threshold=args.threshold,
+        hysteresis_low=args.hysteresis_low,
         bandpass_center_hz=center,
         bandpass_width_hz=args.bandpass_width_hz,
         min_keydown_ms=args.min_keydown_ms,

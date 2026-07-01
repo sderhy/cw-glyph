@@ -38,8 +38,9 @@ class SegmentConfig:
     bandpass_center_hz: float | None = 600.0
     bandpass_width_hz: float = 500.0
     noise_floor_percentile: float = 20.0
-    threshold_mode: Literal["fixed", "adaptive"] = "fixed"
-    threshold: float = 0.18
+    threshold_mode: Literal["fixed", "adaptive", "hysteresis"] = "hysteresis"
+    threshold: float = 0.22
+    hysteresis_low: float = 0.12
     adaptive_window_ms: float = 650.0
     adaptive_floor_percentile: float = 20.0
     adaptive_peak_percentile: float = 90.0
@@ -183,6 +184,8 @@ def _active_mask(
 ) -> np.ndarray:
     if config.threshold_mode == "fixed":
         return envelope >= config.threshold
+    if config.threshold_mode == "hysteresis":
+        return _hysteresis_mask(envelope, config.threshold, config.hysteresis_low)
     if config.threshold_mode != "adaptive":
         raise ValueError(f"unknown threshold mode: {config.threshold_mode!r}")
     _validate_adaptive_config(config)
@@ -205,6 +208,24 @@ def _active_mask(
     threshold = floor + config.threshold * np.maximum(peak - floor, 0.0)
     threshold = np.maximum(threshold, config.adaptive_min_threshold)
     return envelope >= threshold
+
+
+def _hysteresis_mask(envelope: np.ndarray, high: float, low: float) -> np.ndarray:
+    """Dual-threshold detection: keep low-threshold runs holding a confident peak.
+
+    An element body is kept wherever the envelope stays above ``low``, but only
+    for runs that reach ``high`` somewhere — so weak/fading element tails are
+    recovered (fewer missed elements) without promoting pure-noise excursions
+    that never cross ``high`` (few spurious elements). Falls back to a plain
+    fixed threshold if ``low`` is not below ``high``.
+    """
+    if not 0.0 <= low < high:
+        return envelope >= high
+    out = np.zeros(envelope.shape, dtype=bool)
+    for region in _runs(envelope >= low):
+        if np.any(envelope[region.start : region.end] >= high):
+            out[region.start : region.end] = True
+    return out
 
 
 def _validate_adaptive_config(config: SegmentConfig) -> None:

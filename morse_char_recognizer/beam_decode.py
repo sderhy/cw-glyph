@@ -42,7 +42,7 @@ class BeamConfig:
     """
 
     min_element_units: float = 0.45  # drop elements shorter than this * unit (noise)
-    dot_dash_split: float = 2.0  # element is a dah when duration >= this * unit
+    dot_dash_split: float = 1.8  # element is a dah when duration >= this * unit
     max_elements_per_char: int = 8  # longest valid glyph (<HH> = 8 dits)
     char_cost: float = 0.0  # optional MDL prior: penalty per emitted character
     boundary_threshold: float = 2.0  # gap units separating intra-element from char gap
