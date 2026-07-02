@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import replace
 from pathlib import Path
 
 from morse_char_recognizer.audio_io import read_wav_mono
 from morse_char_recognizer.beam_decode import BeamConfig, beam_decode_audio
+from morse_char_recognizer.classes import CLASS_PRESETS, parse_class_spec
 from morse_char_recognizer.live import (
     compare_text,
     default_label_path,
@@ -33,7 +33,11 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--duration", type=float, default=0.0, help="0 = whole file")
     # segmentation / element detection
     p.add_argument("--threshold", type=float, default=0.22)
-    p.add_argument("--threshold-mode", choices=["fixed", "adaptive", "hysteresis"], default="hysteresis")
+    p.add_argument(
+        "--threshold-mode",
+        choices=["fixed", "adaptive", "hysteresis"],
+        default="hysteresis",
+    )
     p.add_argument("--hysteresis-low", type=float, default=0.12)
     p.add_argument("--bandpass-center-hz", type=float, default=None)
     p.add_argument("--bandpass-width-hz", type=float, default=100.0)
@@ -45,12 +49,14 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--min-unit-ms", type=float, default=35.0)
     p.add_argument("--max-unit-ms", type=float, default=140.0)
     # beam / DP scoring
-    p.add_argument("--dot-dash-split", type=float, default=2.0)
+    p.add_argument("--dot-dash-split", type=float, default=1.8)
     p.add_argument("--char-cost", type=float, default=0.0)
     p.add_argument("--boundary-threshold", type=float, default=2.0)
     p.add_argument("--w-internal", type=float, default=1.0)
     p.add_argument("--w-boundary", type=float, default=1.0)
     p.add_argument("--word-gap-units", type=float, default=5.0)
+    p.add_argument("--allowed-class-preset", choices=tuple(CLASS_PRESETS), default=None)
+    p.add_argument("--allowed-classes", default=None)
     p.add_argument("--json-out", default=None)
     return p.parse_args()
 
@@ -88,6 +94,11 @@ def main() -> None:
         w_internal=args.w_internal,
         w_boundary=args.w_boundary,
         word_gap_units=args.word_gap_units,
+        allowed_tokens=(
+            parse_class_spec(args.allowed_classes, preset=args.allowed_class_preset)
+            if args.allowed_class_preset is not None or args.allowed_classes is not None
+            else None
+        ),
     )
 
     decoded, regions, unit_samples = beam_decode_audio(
@@ -101,7 +112,10 @@ def main() -> None:
     reference = read_label(label_path)
 
     unit_ms = 1000.0 * unit_samples / sample_rate
-    print(f"center_hz={center:.1f} elements={len(regions)} unit={unit_samples}smp ({unit_ms:.1f}ms)")
+    print(
+        f"center_hz={center:.1f} elements={len(regions)} "
+        f"unit={unit_samples}smp ({unit_ms:.1f}ms)"
+    )
     print(f"decoded: {decoded}")
 
     summary = {
@@ -111,6 +125,8 @@ def main() -> None:
         "unit_samples": unit_samples,
         "decoded": decoded,
         "reference": reference,
+        "allowed_class_preset": args.allowed_class_preset,
+        "allowed_classes": args.allowed_classes,
     }
     if reference:
         cmp = compare_text(reference, decoded)

@@ -55,6 +55,26 @@ class AlignmentOp:
     hypothesis_index: int
 
 
+@dataclass(frozen=True)
+class CarrierFrame:
+    """Dominant tone estimate for one short audio window."""
+
+    start_s: float
+    end_s: float
+    center_hz: float
+    power: float
+
+
+@dataclass(frozen=True)
+class CarrierSegment:
+    """Piecewise-stable carrier estimate over a larger audio interval."""
+
+    start_s: float
+    end_s: float
+    center_hz: float
+    frames: int
+
+
 def slice_audio(
     audio: np.ndarray,
     sample_rate: int,
@@ -97,6 +117,104 @@ def estimate_carrier_hz(audio: np.ndarray, sample_rate: int, f_min: float, f_max
     if not mask.any():
         return 600.0
     return float(frequencies[mask][int(np.argmax(power[mask]))])
+
+
+def estimate_carrier_track(
+    audio: np.ndarray,
+    sample_rate: int,
+    f_min: float,
+    f_max: float,
+    *,
+    window_s: float = 4.0,
+    hop_s: float = 2.0,
+) -> list[CarrierFrame]:
+    """Estimate dominant CW tone frequency in short overlapping windows."""
+    if audio.size == 0:
+        return []
+    if window_s <= 0:
+        raise ValueError(f"window_s must be positive, got {window_s}")
+    if hop_s <= 0:
+        raise ValueError(f"hop_s must be positive, got {hop_s}")
+
+    window = max(1, int(round(window_s * sample_rate)))
+    hop = max(1, int(round(hop_s * sample_rate)))
+    starts = list(range(0, max(1, audio.size - window + 1), hop))
+    if not starts or starts[-1] + window < audio.size:
+        starts.append(max(0, audio.size - window))
+
+    frames: list[CarrierFrame] = []
+    for start in starts:
+        end = min(audio.size, start + window)
+        chunk = audio[start:end]
+        if chunk.size == 0:
+            continue
+        nperseg = min(chunk.size, 4096)
+        frequencies, power = welch(chunk, fs=sample_rate, nperseg=nperseg)
+        mask = (frequencies >= f_min) & (frequencies <= f_max)
+        if not mask.any():
+            center = estimate_carrier_hz(chunk, sample_rate, f_min, f_max)
+            peak_power = 0.0
+        else:
+            band_frequencies = frequencies[mask]
+            band_power = power[mask]
+            peak = int(np.argmax(band_power))
+            center = float(band_frequencies[peak])
+            peak_power = float(band_power[peak])
+        frames.append(
+            CarrierFrame(
+                start / sample_rate,
+                end / sample_rate,
+                center,
+                peak_power,
+            )
+        )
+    return frames
+
+
+def carrier_track_is_stable(
+    frames: Sequence[CarrierFrame],
+    *,
+    tolerance_hz: float = 50.0,
+) -> bool:
+    """Return True when a carrier track stays within a narrow frequency span."""
+    if not frames:
+        return True
+    centers = np.array([frame.center_hz for frame in frames], dtype=np.float32)
+    return float(np.percentile(centers, 90) - np.percentile(centers, 10)) <= tolerance_hz
+
+
+def carrier_segments_from_track(
+    frames: Sequence[CarrierFrame],
+    audio_duration_s: float,
+    *,
+    jump_hz: float = 60.0,
+    min_segment_s: float = 6.0,
+) -> list[CarrierSegment]:
+    """Collapse a carrier track into piecewise-stable frequency segments."""
+    if not frames:
+        return []
+    if jump_hz <= 0:
+        raise ValueError(f"jump_hz must be positive, got {jump_hz}")
+    if min_segment_s < 0:
+        raise ValueError(f"min_segment_s must be non-negative, got {min_segment_s}")
+
+    centers = np.array([frame.center_hz for frame in frames], dtype=np.float32)
+    smoothed = _median_smooth(centers, width=3)
+    groups: list[tuple[int, int]] = []
+    start = 0
+    current_values = [float(smoothed[0])]
+    for index in range(1, len(frames)):
+        current_center = float(np.median(current_values))
+        if abs(float(smoothed[index]) - current_center) > jump_hz:
+            groups.append((start, index))
+            start = index
+            current_values = [float(smoothed[index])]
+        else:
+            current_values.append(float(smoothed[index]))
+    groups.append((start, len(frames)))
+
+    segments = _segments_from_groups(frames, groups, centers, audio_duration_s)
+    return _merge_short_carrier_segments(segments, min_segment_s=min_segment_s, jump_hz=jump_hz)
 
 
 def default_label_path(wav_path: Path) -> Path | None:
@@ -365,6 +483,115 @@ def _sorted_counts(counts: dict[str, int]) -> list[dict[str, int | str]]:
         {"item": item, "count": count}
         for item, count in sorted(counts.items(), key=lambda entry: (-entry[1], entry[0]))
     ]
+
+
+def _median_smooth(values: np.ndarray, *, width: int) -> np.ndarray:
+    if values.size == 0 or width <= 1:
+        return values.astype(np.float32, copy=True)
+    radius = width // 2
+    out = np.empty_like(values, dtype=np.float32)
+    for index in range(values.size):
+        start = max(0, index - radius)
+        end = min(values.size, index + radius + 1)
+        out[index] = float(np.median(values[start:end]))
+    return out
+
+
+def _segments_from_groups(
+    frames: Sequence[CarrierFrame],
+    groups: Sequence[tuple[int, int]],
+    centers: np.ndarray,
+    audio_duration_s: float,
+) -> list[CarrierSegment]:
+    segments: list[CarrierSegment] = []
+    for group_index, (start_index, end_index) in enumerate(groups):
+        if start_index >= end_index:
+            continue
+        if group_index == 0:
+            start_s = 0.0
+        else:
+            prev_mid = _frame_midpoint(frames[start_index - 1])
+            this_mid = _frame_midpoint(frames[start_index])
+            start_s = (prev_mid + this_mid) / 2.0
+        if group_index == len(groups) - 1:
+            end_s = audio_duration_s
+        else:
+            last_mid = _frame_midpoint(frames[end_index - 1])
+            next_mid = _frame_midpoint(frames[end_index])
+            end_s = (last_mid + next_mid) / 2.0
+        center_hz = float(np.median(centers[start_index:end_index]))
+        segments.append(
+            CarrierSegment(
+                max(0.0, start_s),
+                min(audio_duration_s, end_s),
+                center_hz,
+                end_index - start_index,
+            )
+        )
+    return segments
+
+
+def _merge_short_carrier_segments(
+    segments: list[CarrierSegment],
+    *,
+    min_segment_s: float,
+    jump_hz: float,
+) -> list[CarrierSegment]:
+    if len(segments) <= 1 or min_segment_s <= 0:
+        return segments
+    merged = list(segments)
+    index = 0
+    while index < len(merged):
+        segment = merged[index]
+        duration = segment.end_s - segment.start_s
+        if duration >= min_segment_s:
+            index += 1
+            continue
+        if len(merged) == 1:
+            break
+        if index == 0:
+            neighbor = 1
+        elif index == len(merged) - 1:
+            neighbor = index - 1
+        else:
+            left_delta = abs(segment.center_hz - merged[index - 1].center_hz)
+            right_delta = abs(segment.center_hz - merged[index + 1].center_hz)
+            neighbor = index - 1 if left_delta <= right_delta else index + 1
+        combined = _combine_carrier_segments(segment, merged[neighbor])
+        replace_at = min(index, neighbor)
+        drop_at = max(index, neighbor)
+        merged[replace_at] = combined
+        del merged[drop_at]
+        index = max(0, replace_at - 1)
+
+    coalesced: list[CarrierSegment] = []
+    for segment in merged:
+        if (
+            coalesced
+            and abs(segment.center_hz - coalesced[-1].center_hz) <= jump_hz
+        ):
+            coalesced[-1] = _combine_carrier_segments(coalesced[-1], segment)
+        else:
+            coalesced.append(segment)
+    return coalesced
+
+
+def _combine_carrier_segments(a: CarrierSegment, b: CarrierSegment) -> CarrierSegment:
+    frames = a.frames + b.frames
+    if frames <= 0:
+        center_hz = (a.center_hz + b.center_hz) / 2.0
+    else:
+        center_hz = (a.center_hz * a.frames + b.center_hz * b.frames) / frames
+    return CarrierSegment(
+        min(a.start_s, b.start_s),
+        max(a.end_s, b.end_s),
+        center_hz,
+        frames,
+    )
+
+
+def _frame_midpoint(frame: CarrierFrame) -> float:
+    return (frame.start_s + frame.end_s) / 2.0
 
 
 def _canonical_token(token: str) -> str:

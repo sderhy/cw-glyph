@@ -7,6 +7,17 @@ from morse_char_recognizer.morse_table import MORSE_TABLE, PROSIGNS
 BASIC_CLASSES: tuple[str, ...] = tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 PUNCTUATION_CLASSES: tuple[str, ...] = ("?", ",", ".", "=", "+", "'", "/", "$")
 COPY_CLASSES: tuple[str, ...] = (*BASIC_CLASSES, *PUNCTUATION_CLASSES)
+HAM_COPY_CLASSES: tuple[str, ...] = (
+    *BASIC_CLASSES,
+    "/",
+    ".",
+    ",",
+    "?",
+    "=",
+    "+",
+    "<SK>",
+    "<SN>",
+)
 # <BT> is acoustically identical to "=" and <AR> is identical to "+". Keep the
 # printed punctuation forms in REAL_CLASSES so the classifier has one class per
 # distinct sound pattern.
@@ -21,6 +32,7 @@ DEFAULT_CLASSES = BASIC_CLASSES
 
 CLASS_PRESETS: dict[str, tuple[str, ...]] = {
     "basic": BASIC_CLASSES,
+    "ham-copy": HAM_COPY_CLASSES,
     "copy": COPY_CLASSES,
     "copy-prosign": COPY_PROSIGN_CLASSES,
     "real": REAL_CLASSES,

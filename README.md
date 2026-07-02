@@ -150,6 +150,26 @@ For short labelled fragments, prefer a full-file pass (`--duration 0`) over
 fixed windows so artificial window boundaries do not create extra segmentation
 errors.
 
+## Benchmark WebSDR Beam/Timing
+
+For noisy WebSDR recordings, first measure the checkpoint-free beam/timing path
+before involving the CNN. The WebSDR benchmark uses a narrow local carrier
+track and the `ham-copy` profile: letters, digits, `/`, `.`, `,`, `?`, `=`,
+`+`, `<SK>`, and `<SN>`. That profile is opt-in and is not imposed on the older
+g3ses, g6pz, QSO, or CNN evaluation commands.
+
+```bash
+python scripts/eval_websdr_beam.py \
+  livetests/websdr \
+  --json-out outputs/websdr_beam_eval.json \
+  --preview-dir outputs/websdr_previews
+```
+
+The per-file report includes decoded text, CER, dominant carrier track,
+piecewise center frequencies, estimated dot unit, detected element count, and
+top alignment errors. Use `--no-track` to compare against a single global
+carrier estimate.
+
 ## Evaluate Segmentation Alone
 
 Synthetic segmentation tests report missed, split, merged, and false-positive

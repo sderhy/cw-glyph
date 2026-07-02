@@ -1,6 +1,6 @@
 """Tests for the element-level beam/DP Morse decoder."""
 
-from morse_char_recognizer.beam_decode import BeamConfig, beam_decode_regions
+from morse_char_recognizer.beam_decode import BeamConfig, beam_decode_regions, enumerate_valid_spans
 from morse_char_recognizer.morse_table import MORSE_TABLE
 from morse_char_recognizer.segment import Region
 
@@ -66,3 +66,34 @@ def test_short_noise_element_is_dropped():
 
 def test_empty_returns_empty():
     assert beam_decode_regions([], UNIT) == ""
+
+
+def test_allowed_tokens_restrict_decode_vocabulary():
+    # "..-.." is É in the full table. The WebSDR ham-copy profile intentionally
+    # excludes accented glyphs so noisy timing cannot emit them as copy.
+    regions = []
+    pos = 0
+    for sym in "..-..":
+        duration = (3 if sym == "-" else 1) * UNIT
+        regions.append(Region(pos, pos + duration))
+        pos += duration + UNIT
+
+    ham_copy = tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") + (
+        "/",
+        ".",
+        ",",
+        "?",
+        "=",
+        "+",
+        "<SK>",
+        "<SN>",
+    )
+
+    assert beam_decode_regions(regions, UNIT) == "É"
+    constrained = beam_decode_regions(regions, UNIT, BeamConfig(allowed_tokens=ham_copy))
+    assert "É" not in constrained
+    assert (0, 5, "É") not in enumerate_valid_spans(
+        list("..-.."),
+        max_elements_per_char=8,
+        allowed_tokens=ham_copy,
+    )

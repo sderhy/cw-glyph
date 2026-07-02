@@ -8,8 +8,11 @@ import pytest
 from morse_char_recognizer.live import (
     align_text,
     alignment_summary,
+    carrier_segments_from_track,
+    carrier_track_is_stable,
     compare_best_substring,
     compare_text,
+    estimate_carrier_track,
     normalize_copy_text,
     slice_audio,
     tokenize_copy_text,
@@ -88,3 +91,35 @@ def test_slice_audio_returns_offset() -> None:
 
 def test_window_starts_covers_long_audio() -> None:
     assert window_starts(125.0, 60.0, 60.0) == [0.0, 60.0, 120.0]
+
+
+def test_carrier_track_splits_large_frequency_jump() -> None:
+    sample_rate = 8000
+    first = _tone(600.0, 3.0, sample_rate)
+    second = _tone(760.0, 3.0, sample_rate)
+    audio = np.concatenate([first, second])
+
+    frames = estimate_carrier_track(
+        audio,
+        sample_rate,
+        500.0,
+        900.0,
+        window_s=1.0,
+        hop_s=1.0,
+    )
+    segments = carrier_segments_from_track(
+        frames,
+        audio.size / sample_rate,
+        jump_hz=80.0,
+        min_segment_s=0.0,
+    )
+
+    assert not carrier_track_is_stable(frames, tolerance_hz=80.0)
+    assert len(segments) == 2
+    assert segments[0].center_hz == pytest.approx(600.0, abs=15.0)
+    assert segments[1].center_hz == pytest.approx(760.0, abs=15.0)
+
+
+def _tone(freq_hz: float, duration_s: float, sample_rate: int) -> np.ndarray:
+    t = np.arange(int(duration_s * sample_rate), dtype=np.float32) / sample_rate
+    return np.sin(2 * np.pi * freq_hz * t).astype(np.float32)

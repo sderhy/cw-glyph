@@ -5,7 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from morse_char_recognizer.classes import CLASS_PRESETS, REAL_CLASSES, parse_class_spec
+from morse_char_recognizer.classes import (
+    CLASS_PRESETS,
+    HAM_COPY_CLASSES,
+    REAL_CLASSES,
+    parse_class_spec,
+)
 from morse_char_recognizer.dataset import (
     SyntheticDatasetConfig,
     SyntheticMorseCharacterDataset,
@@ -64,6 +69,16 @@ def test_copy_prosign_preset_excludes_run_ons() -> None:
     assert "<KN>" in classes
     assert "<UR>" not in classes
     assert "<BK>" not in classes
+
+
+def test_ham_copy_preset_excludes_noisy_real_glyphs() -> None:
+    assert CLASS_PRESETS["ham-copy"] == HAM_COPY_CLASSES
+    assert "<SK>" in HAM_COPY_CLASSES
+    assert "<SN>" in HAM_COPY_CLASSES
+    assert "É" not in HAM_COPY_CLASSES
+    assert "<UR>" not in HAM_COPY_CLASSES
+    assert ":" not in HAM_COPY_CLASSES
+    assert "&" not in HAM_COPY_CLASSES
 
 
 def test_parse_class_spec_supports_multi_character_tokens() -> None:

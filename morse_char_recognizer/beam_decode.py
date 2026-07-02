@@ -50,17 +50,37 @@ class BeamConfig:
     w_boundary: float = 1.0  # penalty per unit a boundary gap is below threshold
     word_gap_units: float = 5.0  # boundary gap >= this emits a word space
     prefer_letters: bool = True  # resolve dit/dah aliases to letters, not prosigns
+    allowed_tokens: tuple[str, ...] | None = None  # optional decode vocabulary
 
 
-def _lookup(pattern: str, *, prefer_letters: bool) -> str | None:
+def _lookup(
+    pattern: str,
+    *,
+    prefer_letters: bool,
+    allowed_tokens: tuple[str, ...] | None = None,
+) -> str | None:
     """Map a dit/dah pattern to a character token, or None if it is not valid."""
+    candidates = _lookup_candidates(pattern, prefer_letters=prefer_letters)
+    if allowed_tokens is None:
+        return candidates[0] if candidates else None
+    allowed = set(allowed_tokens)
+    for candidate in candidates:
+        if candidate in allowed:
+            return candidate
+    return None
+
+
+def _lookup_candidates(pattern: str, *, prefer_letters: bool) -> list[str]:
+    candidates: list[str | None]
     if prefer_letters:
-        if pattern in INVERSE_TABLE:
-            return INVERSE_TABLE[pattern]
-        return INVERSE_PROSIGNS.get(pattern)
-    if pattern in INVERSE_PROSIGNS:
-        return INVERSE_PROSIGNS[pattern]
-    return INVERSE_TABLE.get(pattern)
+        candidates = [INVERSE_TABLE.get(pattern), INVERSE_PROSIGNS.get(pattern)]
+    else:
+        candidates = [INVERSE_PROSIGNS.get(pattern), INVERSE_TABLE.get(pattern)]
+    out: list[str] = []
+    for candidate in candidates:
+        if candidate is not None and candidate not in out:
+            out.append(candidate)
+    return out
 
 
 def classify_elements(
@@ -82,7 +102,11 @@ def filter_regions(
 
 
 def enumerate_valid_spans(
-    symbols: list[str], *, max_elements_per_char: int, prefer_letters: bool = True
+    symbols: list[str],
+    *,
+    max_elements_per_char: int,
+    prefer_letters: bool = True,
+    allowed_tokens: tuple[str, ...] | None = None,
 ) -> list[tuple[int, int, str]]:
     """List every ``(j, i, char)`` where ``symbols[j:i]`` is a valid Morse glyph.
 
@@ -95,7 +119,11 @@ def enumerate_valid_spans(
     for i in range(1, n + 1):
         for length in range(1, min(max_elements_per_char, i) + 1):
             j = i - length
-            char = _lookup("".join(symbols[j:i]), prefer_letters=prefer_letters)
+            char = _lookup(
+                "".join(symbols[j:i]),
+                prefer_letters=prefer_letters,
+                allowed_tokens=allowed_tokens,
+            )
             if char is not None:
                 spans.append((j, i, char))
     return spans
@@ -128,8 +156,8 @@ def beam_decode_regions(
         (regions[k + 1].start - regions[k].end) / unit_samples for k in range(n - 1)
     ]
 
-    NEG = float("-inf")
-    score = [NEG] * (n + 1)
+    neg = float("-inf")
+    score = [neg] * (n + 1)
     score[0] = 0.0
     back: list[tuple[int, str, bool] | None] = [None] * (n + 1)
 
@@ -137,9 +165,13 @@ def beam_decode_regions(
         max_len = min(config.max_elements_per_char, i)
         for length in range(1, max_len + 1):
             j = i - length
-            if score[j] == NEG:
+            if score[j] == neg:
                 continue
-            char = _lookup("".join(symbols[j:i]), prefer_letters=config.prefer_letters)
+            char = _lookup(
+                "".join(symbols[j:i]),
+                prefer_letters=config.prefer_letters,
+                allowed_tokens=config.allowed_tokens,
+            )
             if char is None:
                 continue
             s = score[j] - config.char_cost
@@ -158,7 +190,7 @@ def beam_decode_regions(
                 score[i] = s
                 back[i] = (j, char, space_before)
 
-    if score[n] == NEG:
+    if score[n] == neg:
         return ""
 
     segments: list[tuple[str, bool]] = []
