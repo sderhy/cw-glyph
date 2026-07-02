@@ -100,6 +100,9 @@ python scripts/train_cnn.py \
 
 ## Decode A WAV
 
+For a practical list of beam, WebSDR, CNN, batch, and preview decoding
+commands, see [`HOWTO_DECODING.md`](./HOWTO_DECODING.md).
+
 ```bash
 python scripts/decode_wav.py \
   outputs/glyph52_real_unit32_cnn_snr5_25.pt \
