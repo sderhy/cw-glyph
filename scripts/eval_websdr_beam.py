@@ -28,6 +28,11 @@ from morse_char_recognizer.live import (
     estimate_carrier_track,
     read_label,
 )
+from morse_char_recognizer.preview import (
+    FrequencyOverlay,
+    FrequencyPoint,
+    write_spectrogram_png,
+)
 from morse_char_recognizer.segment import SegmentConfig
 
 
@@ -352,30 +357,34 @@ def _write_preview(
     preview_dir: Path,
     args: argparse.Namespace,
 ) -> None:
-    import matplotlib.pyplot as plt
-
     sample_rate, audio = read_wav_mono(wav_path)
-    fig, axis = plt.subplots(figsize=(12, 4))
-    axis.specgram(audio, NFFT=512, Fs=sample_rate, noverlap=384, cmap="magma")
-    for frame in result["center_hz_track"]:
-        mid = (frame["start_s"] + frame["end_s"]) / 2.0
-        axis.plot(mid, frame["center_hz"], marker=".", color="cyan", markersize=3)
-    for segment in result["carrier_segments"]:
-        axis.hlines(
-            segment["center_hz"],
-            segment["start_s"],
-            segment["end_s"],
-            colors="white",
-            linewidth=1.5,
-        )
-    axis.set_ylim(args.freq_min, args.freq_max)
-    axis.set_xlabel("time (s)")
-    axis.set_ylabel("frequency (Hz)")
-    axis.set_title(f"{wav_path.name} CER={result['cer']:.3f}")
-    fig.tight_layout()
     out = preview_dir / f"{wav_path.stem}.png"
-    fig.savefig(out, dpi=140)
-    plt.close(fig)
+    write_spectrogram_png(
+        audio,
+        sample_rate,
+        out,
+        title=f"{wav_path.name} CER={result['cer']:.3f}",
+        min_hz=args.freq_min,
+        max_hz=args.freq_max,
+        overlays=[
+            FrequencyOverlay(
+                segment["start_s"],
+                segment["end_s"],
+                segment["center_hz"],
+                f"{segment['center_hz']:.1f} Hz",
+            )
+            for segment in result["carrier_segments"]
+        ],
+        points=[
+            FrequencyPoint(
+                (frame["start_s"] + frame["end_s"]) / 2.0,
+                frame["center_hz"],
+            )
+            for frame in result["center_hz_track"]
+        ],
+        decoded=result["decoded"],
+        reference=result["reference"],
+    )
     print(f"wrote {out}")
 
 

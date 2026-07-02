@@ -22,6 +22,7 @@ from morse_char_recognizer.live import (
     estimate_carrier_hz,
     read_label,
 )
+from morse_char_recognizer.preview import FrequencyOverlay, write_spectrogram_png
 from morse_char_recognizer.segment import SegmentConfig
 
 
@@ -58,6 +59,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--allowed-class-preset", choices=tuple(CLASS_PRESETS), default=None)
     p.add_argument("--allowed-classes", default=None)
     p.add_argument("--json-out", default=None)
+    p.add_argument("--preview-out", default=None)
+    p.add_argument("--preview-min-hz", type=float, default=0.0)
+    p.add_argument("--preview-max-hz", type=float, default=1400.0)
     return p.parse_args()
 
 
@@ -147,6 +151,28 @@ def main() -> None:
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(summary, indent=1), encoding="utf-8")
         print(f"wrote {args.json_out}")
+
+    if args.preview_out:
+        out = write_spectrogram_png(
+            audio,
+            sample_rate,
+            args.preview_out,
+            title=f"{wav_path.name} beam decode",
+            min_hz=args.preview_min_hz,
+            max_hz=args.preview_max_hz,
+            offset_s=args.start,
+            overlays=[
+                FrequencyOverlay(
+                    args.start,
+                    args.start + audio.size / sample_rate,
+                    center,
+                    f"{center:.1f} Hz",
+                )
+            ],
+            decoded=decoded,
+            reference=reference,
+        )
+        print(f"wrote {out}")
 
 
 if __name__ == "__main__":

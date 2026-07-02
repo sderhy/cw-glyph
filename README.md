@@ -119,6 +119,15 @@ python scripts/preview_wav_decode.py \
   --out outputs/preview.png
 ```
 
+For checkpoint-free beam/timing diagnostics, write a grayscale spectrogram with
+time on the x-axis, frequency on the y-axis, and intensity as signal strength:
+
+```bash
+python scripts/decode_beam.py livetests/g6pz/G12.wav \
+  --auto-center \
+  --preview-out outputs/beam_previews/G12.png
+```
+
 ## Evaluate Labelled Live Tests
 
 For clean grouped-copy training audio, constrain outputs to copy characters:
